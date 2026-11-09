@@ -85,7 +85,7 @@ const EXPECT: Record<string, FixtureExpect> = {
 		tracks: [
 			{ type: "midi", name: "1-808 Core Kit", devices: ["808 Core Kit [Drum Rack]"], muted: false, clips: 3, notes: 331 },
 			{ type: "return", name: "A-Reverb", devices: ["Reverb"], muted: false, clips: 0, notes: 0 },
-			{ type: "return", name: "B-Delay", devices: ["Delay [Simple Delay]"], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "B-Delay", devices: ["Simple Delay"], muted: false, clips: 0, notes: 0 },
 		],
 	},
 	"12/groovebox_template_v12.als": {
@@ -97,7 +97,7 @@ const EXPECT: Record<string, FixtureExpect> = {
 			{ type: "audio", name: "Poly-8", devices: [], muted: false, clips: 0, notes: 0 },
 			{ type: "audio", name: "Horizon", devices: [], muted: false, clips: 0, notes: 0 },
 			{ type: "return", name: "A-Reverb", devices: ["Reverb"], muted: false, clips: 0, notes: 0 },
-			{ type: "return", name: "B-Delay", devices: ["Delay [Simple Delay]"], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "B-Delay", devices: ["Simple Delay"], muted: false, clips: 0, notes: 0 },
 		],
 	},
 	"12/live2midi_test.als": {
@@ -105,6 +105,31 @@ const EXPECT: Record<string, FixtureExpect> = {
 		tracks: [
 			{ type: "midi", name: "Looped clips", devices: [], muted: false, clips: 4, notes: 16 },
 			{ type: "midi", name: "Unlooped clips", devices: [], muted: false, clips: 6, notes: 21 },
+		],
+	},
+	"12/vm_orchestral.als": {
+		creator: "Ableton Live 12.4.16", tempo: 84, ts: [4,4], locators: 3, scenes: 3, arrangementBeats: 96,
+		tracks: [
+			{ type: "midi", name: "Strings", devices: ["Wavetable"], muted: false, clips: 6, notes: 144 },
+			{ type: "midi", name: "Pad", devices: ["Drift"], muted: false, clips: 4, notes: 96 },
+			{ type: "midi", name: "Bass", devices: ["Operator"], muted: false, clips: 4, notes: 64 },
+			{ type: "midi", name: "Perc", devices: ["Drum Rack"], muted: false, clips: 2, notes: 96 },
+			{ type: "audio", name: "5-Audio", devices: [], muted: false, clips: 0, notes: 0 },
+			{ type: "audio", name: "6-Audio", devices: [], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "A-Reverb", devices: ["Reverb"], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "B-Delay", devices: ["Simple Delay"], muted: false, clips: 0, notes: 0 },
+		],
+	},
+	"12/vm_session_chords.als": {
+		creator: "Ableton Live 12.4.15", tempo: 100, ts: [4,4], locators: 0, scenes: 2, arrangementBeats: 0,
+		tracks: [
+			{ type: "midi", name: "Chords", devices: ["Wavetable"], muted: false, clips: 2, notes: 36 },
+			{ type: "midi", name: "Bass", devices: ["Operator"], muted: false, clips: 1, notes: 8 },
+			{ type: "midi", name: "Melody", devices: ["Drift"], muted: false, clips: 1, notes: 12 },
+			{ type: "audio", name: "4-Audio", devices: [], muted: false, clips: 0, notes: 0 },
+			{ type: "audio", name: "5-Audio", devices: [], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "A-Reverb", devices: ["Reverb"], muted: false, clips: 0, notes: 0 },
+			{ type: "return", name: "B-Delay", devices: ["Simple Delay"], muted: false, clips: 0, notes: 0 },
 		],
 	},
 };
@@ -134,6 +159,34 @@ for (const [rel, exp] of Object.entries(EXPECT)) {
 		assert.ok(s.includes(`${Math.round(exp.tempo * 100) / 100} BPM`));
 	});
 }
+
+test("фикстура из VM (Live 12.4.16): локаторы, автоматизация громкости, Session и Arrangement", () => {
+	const p = readProject(path.join(FIX, "12/vm_orchestral.als"));
+	assert.deepEqual(p.locators, [{ time: 0, name: "Intro" }, { time: 32, name: "Theme" }, { time: 64, name: "Climax" }]);
+	assert.deepEqual(p.tracks.filter((t) => t.volumeAutomation).map((t) => t.name), ["Strings"]);
+	assert.equal(p.arrangementLength, 96);
+	const strings = p.tracks[0];
+	assert.deepEqual(strings.clips.filter((c) => c.where === "arrangement").map((c) => [c.name, c.start, c.length, c.notes.length]), [["Strings intro", 0, 32, 24], ["Strings theme", 32, 32, 24], ["Strings climax", 64, 32, 24]]);
+	assert.deepEqual(strings.clips.filter((c) => c.where === "session").map((c) => [c.name, c.scene]), [["Strings intro", 0], ["Strings theme", 1], ["Strings climax", 2]]);
+	const s = summarize(p);
+	assert.match(s, /Локаторы: Intro \(т1\), Theme \(т9\), Climax \(т17\)/);
+	assert.match(s, /«Strings» \(автоматизация громкости\)/);
+	const an = analyzeProject(p);
+	assert.match(an, /«Intro» т1–9: C мажор, звучит треков: 1/);
+	assert.match(an, /«Climax» т17–25: D мажор, звучит треков: 4/);
+	assert.match(an, /Энергия[^\n]*\[1 3 4\]/);
+});
+
+test("фикстура из VM: аккорды, бас и мелодия в Session", () => {
+	const p = readProject(path.join(FIX, "12/vm_session_chords.als"));
+	assert.equal(p.tempo, 100);
+	assert.equal(p.arrangementLength, 0);
+	const an = analyzeProject(p);
+	assert.match(an, /Тональность \(Крумхансл\): C мажор/);
+	assert.match(an, /Аккорды \(т1–8\): C \| G \| Am \| F \| C \| G\/B \| Am \| F\/A/);
+	assert.match(an, /ступени: I \| V \| vi \| IV \| I \| V6 \| vi \| IV6/);
+	assert.match(an, /Бас «Bass» против корней: корень 4[^\n]*бас на корнях/);
+});
 
 test("фикстуры: версии Live 10, 11 и 12 представлены", () => {
 	const majors = new Set(Object.keys(EXPECT).map((k) => k.split("/")[0]));

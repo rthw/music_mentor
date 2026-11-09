@@ -28,7 +28,16 @@
 | `12/live2midi_test.als` | 12.4.16 | github.com/nwhetsell/live2midi, `test_live2midi.als.xml`, коммит 8c7ea6c; сжат gzip (петли, выключенные ноты) | MIT |
 | `12/groovebox_template_v12.als` | 12.2 | github.com/sheaivey/GrooveboxToAbleton, `examples/als/Template_v12.als.xml`, коммит a3d919a; сжат gzip (аудио-треки, без клипов) | MIT |
 
-Сеты, собранные самим автором в Live 12 (аккорды + бас + мелодия в Session; «оркестровая» аранжировка с
-локаторами и автоматизацией громкости), сюда добавятся, когда будет доступна виртуальная машина с Live.
-Пока этих сценариев нет в реальных файлах, их покрывает синтетический `.als` из `tests/alsbuild.ts`
-(собирается в тесте, в Live не открывался).
+### Сеты из виртуальной машины (Live 12.4.15–12.4.16, собраны через `win_live`/AgentBridge)
+
+Оба файла собраны 2026-11-09 в Live 12 Suite в VM автора; звук не включался. В VM лежат в
+`C:\Users\max\Documents\agent_sets\2026-11-09_<имя>\<имя> Project\`. Ноты, имена и инструменты заданы
+командами моста; трек-лист — стандартный (после «Ctrl+N» в Live два пустых аудио-трека и возвраты A/B).
+
+| Файл | Что внутри |
+|---|---|
+| `12/vm_session_chords.als` | 100 BPM. Session: Chords (Wavetable) — 2 клипа «Chords», «Chords 2»; Bass (Operator); Melody (Drift). Прогрессия C–G–Am–F, 4 такта; 3 трека и 2 сцены, 56 нот |
+| `12/vm_orchestral.als` | 84 BPM, 24 такта. Arrangement: Strings (Wavetable) — 3 клипа; Pad (Drift); Bass (Operator); Perc (Drum Rack). Локаторы Intro (т1), Theme (т9), Climax (т17). Тональность C мажор, секция Climax — D мажор. Автоматизация громкости на Strings (дорожка автоматизации Arrangement; в Session-клипах те же огибающие как `ClipEnvelope`). Те же клипы лежат и в Session |
+
+Расширения моста для этих сетов (`set_track_name`, `set_tempo`, `set_time`+`add_locator`, `clip_envelope`) добавлены в
+`agent_tools/win_live/remote_script/AgentBridge/commands.py`.

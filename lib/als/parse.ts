@@ -152,7 +152,7 @@ export function deviceName(node: XmlNode): string {
 	const plug = val(node, "PluginDesc/VstPluginInfo/PlugName") ?? val(node, "PluginDesc/Vst3PluginInfo/Name") ?? val(node, "PluginDesc/AuPluginInfo/Name");
 	const own = plug ? `${plug} (плагин)` : (DEVICE_NAMES[node.tag] ?? node.tag);
 	// переименованное пользователем устройство: показываем и его имя, и что это за устройство
-	return user && user !== plug && user !== own ? `${user} [${own}]` : own;
+	return user && user !== plug && user !== own && user !== node.tag ? `${user} [${own}]` : own;
 }
 
 const SCALE_NAMES = [
