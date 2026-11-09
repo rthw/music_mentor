@@ -6,3 +6,5 @@ node_modules/
 Thumbs.db
 # рабочая папка ученика и снимки не живут в репо
 /learner/
+__pycache__/
+*.pyc
