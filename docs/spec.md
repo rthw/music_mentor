@@ -307,3 +307,9 @@ search/page` → модель пишет карточку → проверки. 
 - 2026-11-08: только Windows; запись в проект только добавлением; репо публичный без текстов книг;
   ключ вне репо, строкой установки от автора; основной способ смотреть проект — `.als`, мост — для
   живого состояния и записи; модель по умолчанию `deepseek-v4-pro`.
+- 2026-11-09 (T1613, прогон на чистой Win11): `install.ps1` — UTF-8 **без** BOM. По `irm | iex` PowerShell 5.1 уже декодирует
+  ответ по `charset=utf-8` из заголовка raw.githubusercontent, а BOM остаётся первым символом строки и ломает `iex`
+  («The term '﻿#' is not recognized»). Остальные `.ps1` (`change_key`, `update`, `lib/win/common.ps1`) запускаются с диска —
+  им BOM нужен. pi ставится так: Node LTS (zip с nodejs.org, проверка SHA256, без админа) + `npm install -g --ignore-scripts`
+  `@earendil-works/pi-coding-agent@1.5.0` в `%LOCALAPPDATA%\music_mentor\npm` (версия закреплена); winget-вариант `EarendilWorks.pi` не использован.
+  Shift+Enter в Windows Terminal: pi сам распознаёт Shift на Windows, настройки терминала не трогаем.

@@ -23,10 +23,11 @@ function findPwsh(): string | undefined {
 const pwsh = findPwsh();
 const skipPs = pwsh ? false : "pwsh не найден (mise use pwsh или MM_PWSH)";
 
-test("PowerShell-файлы: UTF-8 с BOM", () => {
+test("PowerShell-файлы: UTF-8 с BOM, кроме install.ps1 (его читает irm | iex, BOM ломает первую команду)", () => {
 	for (const f of PS_FILES) {
 		const b = readFileSync(path.join(ROOT, f));
-		assert.deepEqual([...b.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${f} без BOM`);
+		const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+		assert.equal(bom, f !== "install.ps1", f === "install.ps1" ? "install.ps1 не должен начинаться с BOM" : `${f} без BOM`);
 	}
 });
 
