@@ -98,7 +98,7 @@ test("хроматизм: bVII и вторичная доминанта, чуж�
 	assert.equal(segs[4].chord?.degree, "bVII");
 	assert.equal(segs[1].chord?.degree, "VI7");
 	const out = outOfKey(notes, k);
-	assert.equal(out.count, 3); // C#, Bb (дважды: аккорд на 2 ноты Bb? считаем по нотам)
+	assert.equal(out.count, 3); // чужие ноты по числу нот: C# (A7) и Bb (Bb-аккорд: бас и терция)
 	assert.deepEqual(out.byPc.map((x) => x.pc).sort(), [1, 10]);
 });
 
