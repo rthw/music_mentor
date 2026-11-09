@@ -68,7 +68,7 @@ export function enableSteps(): string {
 	return [
 		"Окно Live должно быть открыто, а мост выключен. Включить его надо один раз:",
 		"1. Открой настройки Live: Options → Preferences (на Windows Ctrl+запятая).",
-		"2. Вкладка: в Live 11 и 12 — «Link, Tempo & MIDI» (в Live 12 также «Link/Tempo/MIDI»); в Live 10 — «Link MIDI».",
+		"2. Вкладка: в Live 11 и в Live 12 до 12.3 — «Link, Tempo & MIDI» (иногда «Link/Tempo/MIDI»); в новых Live 12 (проверено на 12.4) она называется «Tempo & MIDI», рядом отдельная «Link»; в Live 10 — «Link MIDI».",
 		"3. В блоке Control Surface выбери в свободной строке MentorBridge. Input и Output оставь None.",
 		"4. Закрой настройки и скажи мне — я проверю связь.",
 		"Если MentorBridge в списке нет: Live надо перезапустить после установки, и проверь, что папка MentorBridge лежит в User Library\\Remote Scripts.",
