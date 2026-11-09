@@ -1,0 +1,26 @@
+{
+  "name": "music-mentor",
+  "version": "0.1.0",
+  "description": "Наставник по музыке и Ableton Live для pi: читает проекты, считает теорию по нотам",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec \"tests/*.test.ts\""
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
