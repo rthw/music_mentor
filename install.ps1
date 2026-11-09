@@ -3,7 +3,7 @@
 # Файл в UTF-8 с BOM, PowerShell 5.1+. Каждый шаг идемпотентен и обёрнут в try/catch;
 # ни одного молчаливого выхода и ни одного `exit` (под `irm | iex` он закрыл бы окно PowerShell).
 
-$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.0-rc.2' }
+$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.0-rc.4' }
 $MmRepo = if ($env:MM_REPO) { $env:MM_REPO } else { 'https://github.com/rthw/music_mentor.git' }
 $MmPiVersion = '1.5.0'
 $MmNodeMajorMin = [version]'22.19.0'
@@ -119,7 +119,7 @@ function Step-Git {
 	if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
 		foreach ($scope in @('--scope user', '')) {
 			Write-Host "  winget install Git.Git $scope"
-			$a = @('install', '--id', 'Git.Git', '-e', '--silent', '--accept-package-agreements', '--accept-source-agreements') + @($scope -split ' ' | Where-Object { $_ })
+			$a = @('install', '--id', 'Git.Git', '-e', '--silent', '--source', 'winget', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') + @($scope -split ' ' | Where-Object { $_ })
 			try { & winget.exe @a | Out-Host } catch { Write-Host "  winget не сработал: $($_.Exception.Message)" }
 			Refresh-BootPath
 			if (Find-GitBash) { $done = $true; break }
@@ -212,8 +212,9 @@ function Step-Pi {
 		New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null
 		$npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue)
 		if (-not $npm) { throw 'npm не найден рядом с node' }
-		$old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-		try { & $npm.Source install -g --ignore-scripts --no-fund --no-audit --prefix $npmPrefix "@earendil-works/pi-coding-agent@$MmPiVersion" 2>&1 | Out-Host } finally { $ErrorActionPreference = $old }
+		# Через cmd.exe: stderr npm (warn/notice) иначе показывается в PowerShell 5.1 красным «NativeCommandError».
+		$cmdline = '"{0}" install -g --ignore-scripts --no-fund --no-audit --no-update-notifier --loglevel=error --prefix "{1}" "@earendil-works/pi-coding-agent@{2}" 2>&1' -f $npm.Source, $npmPrefix, $MmPiVersion
+		& cmd.exe /d /s /c "`"$cmdline`"" | Out-Host
 		if ($LASTEXITCODE -ne 0) { throw "npm install закончился кодом $LASTEXITCODE" }
 		if (-not (Test-Path -LiteralPath $piCmd)) { throw "после установки нет $piCmd" }
 		$have = (& $piCmd --version | Select-Object -First 1).ToString().Trim()

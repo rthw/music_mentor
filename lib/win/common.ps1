@@ -417,15 +417,20 @@ function Write-Launcher {
 }
 
 function New-MmShortcut {
+	# WScript.Shell сохраняет файл через ANSI-страницу: в Windows с английской локалью кириллица в имени
+	# превращается в «?». Поэтому .lnk сначала пишем под ASCII-именем во временной папке, потом переименовываем
+	# (Move-Item работает в Юникоде). Остальные поля (путь, аргументы) — BSTR, Юникод сохраняется.
 	param([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkDir, [string]$Description, [string]$Icon)
+	$tmp = Join-Path ([IO.Path]::GetTempPath()) ('mm_' + [guid]::NewGuid().ToString('N') + '.lnk')
 	$sh = New-Object -ComObject WScript.Shell
-	$lnk = $sh.CreateShortcut($Path)
+	$lnk = $sh.CreateShortcut($tmp)
 	$lnk.TargetPath = $Target
 	if ($Arguments) { $lnk.Arguments = $Arguments }
 	if ($WorkDir) { $lnk.WorkingDirectory = $WorkDir }
 	if ($Description) { $lnk.Description = $Description }
 	if ($Icon) { $lnk.IconLocation = $Icon }
 	$lnk.Save()
+	Move-Item -LiteralPath $tmp -Destination $Path -Force
 }
 
 function Get-ShortcutSpecs {
