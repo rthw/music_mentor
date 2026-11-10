@@ -3,7 +3,7 @@
 # Файл в UTF-8 БЕЗ BOM (BOM ломает `irm | iex`), PowerShell 5.1+. Каждый шаг идемпотентен и обёрнут в try/catch;
 # ни одного молчаливого выхода и ни одного `exit` (под `irm | iex` он закрыл бы окно PowerShell).
 
-$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.0-rc.5' }
+$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.0' }
 $MmRepo = if ($env:MM_REPO) { $env:MM_REPO } else { 'https://github.com/rthw/music_mentor.git' }
 $MmPiVersion = '1.5.0'
 $MmNodeMajorMin = [version]'22.19.0'
