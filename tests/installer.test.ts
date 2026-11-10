@@ -160,3 +160,14 @@ test("в репо нет ключей и путей автора", () => {
 		assert.ok(!t.includes("/home/" + "max"), `${f}: путь автора`);
 	}
 });
+
+test("запуск .ps1 с диска всегда с -ExecutionPolicy Bypass (на чистой Win11 политика Restricted)", () => {
+	for (const f of ["lib/win/common.ps1", "extensions/update.ts"]) {
+		const s = readFileSync(path.join(ROOT, f), "utf8");
+		const calls = s.split("\n").filter((l) => /-File/.test(l) && /powershell/i.test(l + s));
+		assert.ok(calls.length > 0, `${f}: нет вызовов -File`);
+		for (const l of calls) assert.match(l, /Bypass/, `${f}: -File без Bypass: ${l.trim()}`);
+	}
+	const sc = readFileSync(path.join(ROOT, "lib/win/common.ps1"), "utf8");
+	assert.equal((sc.match(/-NoProfile -ExecutionPolicy Bypass -File/g) ?? []).length, 2, "оба ярлыка с .ps1 запускаются с Bypass");
+});

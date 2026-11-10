@@ -45,7 +45,7 @@ Ableton Live 10/11/12 + Remote Script MentorBridge (Python 2.7 и 3 одним �
 со ссылками на страницы (см. «Банк знаний»).
 
 ```
-install.ps1                 установщик (UTF-8 с BOM), идемпотентный
+install.ps1                 установщик (UTF-8 без BOM: иначе ломается irm | iex), идемпотентный
 package.json                pi-package (как pi_home): extensions + skills
 extensions/
   als.ts                    project_list, project_summary, clip_notes, project_analysis, project_diff
@@ -101,7 +101,9 @@ $env:MM_KEY='<ключ>'; irm https://raw.githubusercontent.com/rthw/music_mento
   архитектуре с понятной ошибкой.
 - Лишних зависимостей нет: GitHub CLI, вход в GitHub, Python и админ-права не нужны. Права
   администратора (UAC) — только для Live 10 старше 10.1.13 (§4).
-- Кириллица: файл в UTF-8 с BOM, проверить вывод в PowerShell 5.1 через `irm | iex`.
+- Кириллица: `install.ps1` — UTF-8 **без** BOM (по `irm | iex` PowerShell 5.1 декодирует ответ по `charset` из заголовка, а BOM
+  остаётся первым символом и ломает `iex`); остальные `.ps1`, запускаемые с диска, — с BOM. Проверить вывод в PowerShell 5.1 через `irm | iex`.
+- Политика выполнения на чистой Windows 11 — `Restricted`: ярлыки и вызовы `.ps1` с диска идут с `-ExecutionPolicy Bypass`.
 - Готовность — **полный прогон на чистой Windows 10 и 11**, а не проверка одной строки.
 
 Обновление: ярлык или инструмент `mentor_update` → `git fetch --tags`, checkout последнего тега,
@@ -313,3 +315,4 @@ search/page` → модель пишет карточку → проверки. 
   им BOM нужен. pi ставится так: Node LTS (zip с nodejs.org, проверка SHA256, без админа) + `npm install -g --ignore-scripts`
   `@earendil-works/pi-coding-agent@1.5.0` в `%LOCALAPPDATA%\music_mentor\npm` (версия закреплена); winget-вариант `EarendilWorks.pi` не использован.
   Shift+Enter в Windows Terminal: pi сам распознаёт Shift на Windows, настройки терминала не трогаем.
+- 2026-11-10 (T1613): §1 приведён к факту: `install.ps1` без BOM; `.ps1` с диска запускаются с `-ExecutionPolicy Bypass` (на чистой Win11 политика `Restricted`).
