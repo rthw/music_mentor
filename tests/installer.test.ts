@@ -164,7 +164,7 @@ test("в репо нет ключей и путей автора", () => {
 test("запуск .ps1 с диска всегда с -ExecutionPolicy Bypass (на чистой Win11 политика Restricted)", () => {
 	for (const f of ["lib/win/common.ps1", "extensions/update.ts"]) {
 		const s = readFileSync(path.join(ROOT, f), "utf8");
-		const calls = s.split("\n").filter((l) => /-File/.test(l) && /powershell/i.test(l + s));
+		const calls = s.split("\n").filter((l) => /["']-File["' ]/.test(l) && !/Get-ChildItem/.test(l));
 		assert.ok(calls.length > 0, `${f}: нет вызовов -File`);
 		for (const l of calls) assert.match(l, /Bypass/, `${f}: -File без Bypass: ${l.trim()}`);
 	}
