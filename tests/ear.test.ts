@@ -271,6 +271,35 @@ test("ear: нормализация и проверка ответа слова�
 	assert.equal(ear.gradeChoice(`это ${degree.answer.toUpperCase()}`, degree).right, true, `регистр не важен: ${degree.answer}`);
 });
 
+test("ear: вариант для сравнения — те же ноты, что у ответа", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "mm-ear-"));
+	const m = material(dir);
+	const interval = ear.makeTask(m, { kind: "interval", level: 1, rng: () => 0.2 });
+	const fifth = ear.optionNotes(m, interval, "квинта")!;
+	assert.equal(fifth.label, "квинта");
+	assert.equal(fifth.notes.length, 2);
+	assert.equal(fifth.notes[1].pitch - fifth.notes[0].pitch, 7, "квинта — 7 полутонов");
+	// ноты варианта совпадают с нотами задания того же ответа
+	const same = ear.makeTask(m, { kind: "interval", level: 1, rng: () => 0.2 });
+	const variant = ear.optionNotes(m, same, same.answer)!;
+	assert.deepEqual(
+		variant.notes.map((n) => n.pitch),
+		same.notes.map((n) => n.pitch),
+		"вариант сложен из тех же нот, что задание",
+	);
+	const mode = ear.makeTask(m, { kind: "mode", level: 1, rng: () => 0.3 });
+	const other = ear.optionNotes(m, mode, mode.answer === "мажор" ? "минор" : "мажор")!;
+	const pcs = [...new Set(other.notes.map((n) => n.pitch % 12))];
+	assert.ok(pcs.includes(other.label === "минор" ? 3 : 4) || pcs.some((p) => (p - pcs[0] + 12) % 12 === (other.label === "минор" ? 3 : 4)), "терция варианта");
+	const degree = ear.makeTask(m, { kind: "degree", level: 2, rng: () => 0.4 });
+	assert.ok(ear.optionNotes(m, degree, degree.answer), "ступень сыграть можно");
+	// бас и диктант вариантом не переигрываются: у них ответ уже в клипе
+	const bass = ear.makeTask(m, { kind: "bass", level: 1, rng: () => 0.5 });
+	assert.equal(ear.optionNotes(m, bass, bass.answer), null);
+	const dict = ear.makeTask(m, { kind: "dictation", level: 1, rng: () => 0.6 });
+	assert.equal(ear.optionNotes(m, dict, dict.answer), null);
+});
+
 // --- расширение на фейковом мосте ----------------------------------------------------------
 
 function fakeLive(opts: { tracks?: any[] } = {}) {
@@ -454,6 +483,26 @@ test("ear_replay: ещё раз запускает тот же клип", async 
 		assert.match(out.content[0].text, /Проигрываю задание 1 ещё раз/);
 		assert.equal(live.seen.at(-1).cmd, "fire_clip");
 		assert.equal(live.seen.at(-1).slot, 0);
+	} finally {
+		live.close();
+	}
+});
+
+test("ear_replay с compare: играет вариант ученика отдельным клипом", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "mm-ear-"));
+	project(dir);
+	const live = await fakeLive();
+	try {
+		const t = tools(live.port);
+		await run(t.get("ear_next"), { path: "Ночь.als", kind: "interval", level: 1 }, dir);
+		const out = await run(t.get("ear_replay"), { compare: "квинта" }, dir);
+		assert.match(out.content[0].text, /Играю вариант «квинта» для сравнения/);
+		const clip = live.seen.filter((r) => r.cmd === "add_clip").at(-1);
+		assert.equal(clip.name, "Сравнение 1: квинта");
+		assert.equal(clip.notes.length, 2);
+		assert.equal(clip.notes[1].pitch - clip.notes[0].pitch, 7);
+		assert.equal(live.seen.at(-1).cmd, "fire_clip");
+		assert.equal(live.seen.at(-1).slot, 1, "сравнение — в следующем слоте, задание не перезаписано");
 	} finally {
 		live.close();
 	}

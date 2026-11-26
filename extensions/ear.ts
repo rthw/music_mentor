@@ -20,7 +20,7 @@ import { Type } from "typebox";
 import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
 import { readProject, type Project } from "../lib/als/parse.ts";
 import { comparePlay, compareText, compareVerdict } from "../lib/mm/compare.ts";
-import { EAR_KINDS, KIND_TITLES, buildMaterial, gradeChoice, makeTask, type EarKind, type EarLevel, type EarTask } from "../lib/mm/ear.ts";
+import { EAR_KINDS, KIND_TITLES, buildMaterial, gradeChoice, makeTask, optionNotes, type EarKind, type EarLevel, type EarTask } from "../lib/mm/ear.ts";
 import { quietRender } from "../lib/mm/quiet.ts";
 import { backupProject, bridgeAddress, call } from "./live.ts";
 import { liveSource } from "./play.ts";
@@ -263,17 +263,42 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ear_replay",
 		label: "Проиграть задание снова",
-		description: "Проиграть текущее задание на слух ещё раз: тот же клип на треке «Подсказка: Слух» запускается заново.",
-		promptSnippet: "Проиграть задание на слух ещё раз",
-		parameters: Type.Object({}),
+		description:
+			"Проиграть текущее задание на слух ещё раз: тот же клип на треке «Подсказка: Слух» запускается заново. " +
+			"После ошибки — переиграть оба варианта для сравнения: compare с тем, что назвал ученик («квинта», «минор», «IV») — " +
+			"инструмент сыграет этот вариант отдельным клипом, чтобы услышать разницу.",
+		promptSnippet: "Проиграть задание на слух ещё раз (или вариант ученика для сравнения)",
+		parameters: Type.Object({
+			compare: Type.Optional(Type.String({ description: "Вариант ответа, который надо сыграть для сравнения (после ошибки)" })),
+		}),
 		...quietRender(
-			() => "Играю задание ещё раз…",
-			() => "играю снова",
+			(a) => (a?.compare ? "Играю вариант для сравнения…" : "Играю задание ещё раз…"),
+			(r) => (r?.details?.compare ? `играю «${r.details.compare}»` : "играю снова"),
 		),
-		async execute() {
+		async execute(_id, p, _s, _u, ctx) {
 			if (!current) throw new Error("Сейчас нет задания на слух. Сначала ear_next.");
-			await call({ cmd: "fire_clip", track: current.track, slot: current.slot }, addr());
-			return text(`Проигрываю задание ${current.number} ещё раз: трек «${EAR_TRACK}», слот ${current.slot}.`, { number: current.number, slot: current.slot });
+			const task = current.task;
+			if (!p.compare) {
+				await call({ cmd: "fire_clip", track: current.track, slot: current.slot }, addr());
+				return text(`Проигрываю задание ${current.number} ещё раз: трек «${EAR_TRACK}», слот ${current.slot}.`, { number: current.number, slot: current.slot });
+			}
+			const project = pickProject(ctx.cwd, undefined);
+			const material = buildMaterial(project);
+			const variant = material ? optionNotes(material, task, p.compare) : null;
+			if (!variant) {
+				await call({ cmd: "fire_clip", track: current.track, slot: current.slot }, addr());
+				return text(
+					`Сравнивать отдельным вариантом тут нечего: у баса оба проигрывания уже в клипе, а у диктанта сравнение — в разборе. Играю задание ${current.number} ещё раз.`,
+					{ number: current.number, slot: current.slot },
+				);
+			}
+			const where = await earSlot();
+			await call({ cmd: "add_clip", track: where.track, slot: where.slot, length_beats: variant.lengthBeats, notes: variant.notes, name: `Сравнение ${current.number}: ${variant.label}` }, addr());
+			await call({ cmd: "fire_clip", track: where.track, slot: where.slot }, addr());
+			return text(
+				`Играю вариант «${variant.label}» для сравнения: трек «${EAR_TRACK}», слот ${where.slot}. Сейчас прозвучит «${variant.label}», а до этого — задание. Слушай, чем отличается.`,
+				{ compare: variant.label, number: current.number, slot: where.slot },
+			);
 		},
 	});
 

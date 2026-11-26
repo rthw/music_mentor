@@ -505,3 +505,39 @@ export function gradeChoice(given: string, task: EarTask): { right: boolean; mat
 	}
 	return { right: false };
 }
+
+/**
+ * Ноты варианта ответа: после ошибки нужно услышать оба варианта рядом — свой и правильный.
+ * Возвращает null, когда варианта в нотах нет: у баса оба проигрывания уже в клипе, у диктанта
+ * сравнивать нечего (эталон — объяснение после проверки).
+ */
+export function optionNotes(m: EarMaterial, task: EarTask, option: string): { notes: EarNote[]; lengthBeats: number; label: string } | null {
+	const want = normalizeAnswer(option);
+	if (!want) return null;
+	if (task.kind === "interval") {
+		for (const level of [1, 2, 3] as EarLevel[]) {
+			const found = INTERVALS[level].find((x) => normalizeAnswer(x.label) === want || normalizeAnswer(x.label).includes(want));
+			if (!found) continue;
+			const lower = 48 + mod12(m.key.tonic);
+			return { notes: [...flatten([lower], 0, 1), ...flatten([lower + found.semis], 1, 1)], lengthBeats: 3, label: found.label };
+		}
+		return null;
+	}
+	if (task.kind === "mode") {
+		const minor = want.includes("минор");
+		const major = want.includes("мажор");
+		if (!minor && !major) return null;
+		const lowest = Math.min(...task.notes.map((n) => n.pitch));
+		const root = lowest + (task.level >= 2 ? 12 : 0);
+		const pcs = minor ? [0, 3, 7] : [0, 4, 7];
+		const pitches = pcs.map((pc) => root + pc);
+		const spread = task.level >= 3 ? [...pitches, root + 24] : task.level >= 2 ? [root - 12, ...pitches] : pitches;
+		return { notes: flatten(spread, 0, 4), lengthBeats: 4, label: minor ? "минор" : "мажор" };
+	}
+	if (task.kind === "degree") {
+		const chord = m.chords.find((c) => normalizeAnswer(c.numeral) === want);
+		if (!chord) return null;
+		return { notes: flatten(chordPitches(chord, true), 0, 4), lengthBeats: 4, label: chord.numeral };
+	}
+	return null;
+}
