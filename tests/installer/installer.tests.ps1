@@ -88,11 +88,11 @@ Check 'мост: Live 10.1.5 — нужен администратор' (($o10 -
 
 # --- рабочая папка: чьи файлы и что делает обновление -------------------------------------------------------
 # Правило в одном месте: learner\ и notes\ — ученика (только создаются), остальное из template\ —
-# наставника (перезаписывается). Обновление не должно терять правки ученика и не должно оставлять старую роль.
-Check 'шаблон: AGENTS.md — наставника' ((Get-TemplateOwner 'AGENTS.md') -eq 'mentor')
+# агента (перезаписывается). Обновление не должно терять правки ученика и не должно оставлять старую роль.
+Check 'шаблон: AGENTS.md — агента' ((Get-TemplateOwner 'AGENTS.md') -eq 'mentor')
 Check 'шаблон: learner/profile.md — ученика' ((Get-TemplateOwner 'learner/profile.md') -eq 'learner')
 Check 'шаблон: notes/x.md — ученика' ((Get-TemplateOwner (Join-Path 'notes' 'идея.md')) -eq 'learner')
-Check 'шаблон: будущие скиллы — наставника' ((Get-TemplateOwner 'skills/mentor/SKILL.md') -eq 'mentor')
+Check 'шаблон: будущие скиллы — агента' ((Get-TemplateOwner 'skills/mentor/SKILL.md') -eq 'mentor')
 $ws = Join-Path $tmp 'Documents/music_mentor'
 $tpl = Join-Path $tmp 'tpl1'
 Copy-Item -LiteralPath (Join-Path $repo 'template') -Destination $tpl -Recurse
@@ -101,15 +101,15 @@ Check 'рабочая папка: создана целиком' ($r1.Status -eq
 # Ученик правит профиль, пишет свою заметку и заводит свой файл.
 Set-Content -LiteralPath (Join-Path $ws 'learner/profile.md') -Value 'мой профиль'
 Set-Content -LiteralPath (Join-Path $ws 'notes/идея.md') -Value 'моя идея'
-# Вышел новый шаблон: другая роль и новый файл наставника.
+# Вышел новый шаблон: другая роль и новый файл агента.
 $tpl2 = Join-Path $tmp 'tpl2'
 Copy-Item -LiteralPath $tpl -Destination $tpl2 -Recurse
 Set-Content -LiteralPath (Join-Path $tpl2 'AGENTS.md') -Value 'новый AGENTS.md'
 New-Item -ItemType Directory -Path (Join-Path $tpl2 'skills/mentor') -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $tpl2 'skills/mentor/SKILL.md') -Value 'роль наставника'
+Set-Content -LiteralPath (Join-Path $tpl2 'skills/mentor/SKILL.md') -Value 'роль агента'
 $r2 = Copy-WorkspaceTemplate -Template $tpl2 -Workspace $ws
-Check 'обновление: файл наставника перезаписан' (((Get-Content -Raw (Join-Path $ws 'AGENTS.md')).Trim()) -eq 'новый AGENTS.md')
-Check 'обновление: новый файл наставника появился' ((Get-Content -Raw (Join-Path $ws 'skills/mentor/SKILL.md')).Trim() -eq 'роль наставника')
+Check 'обновление: файл агента перезаписан' (((Get-Content -Raw (Join-Path $ws 'AGENTS.md')).Trim()) -eq 'новый AGENTS.md')
+Check 'обновление: новый файл агента появился' ((Get-Content -Raw (Join-Path $ws 'skills/mentor/SKILL.md')).Trim() -eq 'роль агента')
 Check 'обновление: правка ученика в learner/profile.md цела' (((Get-Content -Raw (Join-Path $ws 'learner/profile.md')).Trim()) -eq 'мой профиль')
 Check 'обновление: новый файл ученика не удалён' (((Get-Content -Raw (Join-Path $ws 'notes/идея.md')).Trim()) -eq 'моя идея')
 Check 'обновление: статус и счётчики' ($r2.Status -eq 'обновлена' -and $r2.Mentor -ge 2 -and $r2.Kept -ge 2) ($r2 | Out-String)
@@ -117,7 +117,7 @@ $r3 = Copy-WorkspaceTemplate -Template $tpl2 -Workspace $ws
 Check 'обновление: повтор — «актуальна», правки целы' ($r3.Status -eq 'актуальна' -and ((Get-Content -Raw (Join-Path $ws 'learner/profile.md')).Trim()) -eq 'мой профиль')
 Check 'обновление: строка для окна' ((Format-WorkspaceTemplateResult -Result $r3 -Workspace $ws) -match 'актуальна')
 $plan = @(Get-WorkspaceTemplatePlan -Template $tpl2 -Workspace $ws)
-Check 'план: у файлов наставника write, у ученика keep' ((@($plan | Where-Object { $_.Owner -eq 'mentor' -and $_.Action -ne 'write' }).Count -eq 0) -and (@($plan | Where-Object { $_.Owner -eq 'learner' -and $_.Action -ne 'keep' }).Count -eq 0))
+Check 'план: у файлов агента write, у ученика keep' ((@($plan | Where-Object { $_.Owner -eq 'mentor' -and $_.Action -ne 'write' }).Count -eq 0) -and (@($plan | Where-Object { $_.Owner -eq 'learner' -and $_.Action -ne 'keep' }).Count -eq 0))
 
 # --- настройки pi и ключ ------------------------------------------------------------------------------------
 $st = Join-Path $tmp 'agent/settings.json'
@@ -126,6 +126,8 @@ New-Item -ItemType Directory -Force -Path (Split-Path $st) | Out-Null
 Set-PiSettings -Path $st -ShellPath $null
 $j = Get-Content -Raw $st | ConvertFrom-Json
 Check 'settings: наши поля и чужие сохранены' ($j.defaultProvider -eq 'deepseek' -and $j.defaultModel -eq 'deepseek-v4-pro' -and $j.quietStartup -eq $true -and $j.theme -eq 'dark' -and @($j.packages).Count -eq 1 -and @($j.enabledModels).Count -eq 2)
+# T1909: мысли модели ученику не показываем — блок скрыт, Ctrl+T его вернёт.
+Check 'settings: блок мыслей скрыт' ($j.hideThinkingBlock -eq $true)
 $before = Get-Content -Raw $st
 Set-PiSettings -Path $st -ShellPath $null
 Check 'settings: идемпотентно' ((Get-Content -Raw $st) -eq $before)
@@ -146,7 +148,15 @@ Check 'Test-DeepSeekKey: пустой ключ' (-not (Test-DeepSeekKey '').Ok)
 $env:MM_ROOT = Join-Path $tmp 'root'; $env:MM_DOCUMENTS = $docs; $env:MM_DESKTOP = Join-Path $tmp 'Desktop'
 $P = Get-MmPaths
 $sp = @(Get-ShortcutSpecs -Paths $P -WtPath 'C:\wt.exe')
-Check 'ярлыки: три нужных имени' ($sp.Count -eq 3 -and $sp[0].Name -eq 'Музыкальный наставник' -and $sp[1].Name -eq 'Сменить ключ DeepSeek' -and $sp[2].Name -eq 'Обновить наставника')
+Check 'ярлыки: три нужных имени' ($sp.Count -eq 3 -and $sp[0].Name -eq 'Музыкальный агент' -and $sp[1].Name -eq 'Сменить ключ DeepSeek' -and $sp[2].Name -eq 'Обновить агента')
+# T1909: старые ярлыки («наставник») убираются, чтобы на рабочем столе не было двух на одно.
+$desk = Join-Path $tmp 'OldDesktop'; New-Item -ItemType Directory -Path $desk | Out-Null
+foreach ($legacy in (Get-LegacyShortcutNames)) { [IO.File]::WriteAllText((Join-Path $desk ($legacy + '.lnk')), 'x') }
+[IO.File]::WriteAllText((Join-Path $desk 'Чужой ярлык.lnk'), 'x')
+$gone = @(Remove-LegacyShortcuts -Desktop $desk)
+Check 'ярлыки: старые имена убраны, чужие целы' ($gone.Count -eq 2 -and $gone -contains 'Музыкальный наставник' -and $gone -contains 'Обновить наставника') ($gone -join ', ')
+Check 'ярлыки: файлы старых ярлыков удалены' (-not (Test-Path -LiteralPath (Join-Path $desk 'Музыкальный наставник.lnk')) -and (Test-Path -LiteralPath (Join-Path $desk 'Чужой ярлык.lnk')))
+Check 'ярлыки: повтор — удалять нечего' (@(Remove-LegacyShortcuts -Desktop $desk).Count -eq 0)
 Check 'ярлыки: wt -d <папка> <лаунчер>' ($sp[0].Target -eq 'C:\wt.exe' -and $sp[0].Arguments -like '-d "*music_mentor" "*start_mentor.cmd"')
 Check 'ярлыки: без wt — лаунчер напрямую' ((@(Get-ShortcutSpecs -Paths $P -WtPath $null))[0].Target -like '*start_mentor.cmd')
 Check 'ярлыки: change_key и update через -File' ($sp[1].Arguments -like '*change_key.ps1"' -and $sp[2].Arguments -like '*update.ps1"')

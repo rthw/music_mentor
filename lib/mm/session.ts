@@ -1,8 +1,8 @@
 /**
- * Тихое «раз в сутки» на старте сессии: новая версия наставника и баланс ключа.
+ * Тихое «раз в сутки» на старте сессии: новая версия агента и баланс ключа.
  *
  * Между проверками проходит сутки, иначе каждая сессия ходила бы в сеть и дёргала ученика.
- * Отметки — обычные txt-файлы с ISO-датой в данных наставника (logs\ рядом, корень — mmRoot).
+ * Отметки — обычные txt-файлы с ISO-датой в данных агента (logs\ рядом, корень — mmRoot).
  * Любая ошибка проверки молчит: занятый урок не должен начинаться с сообщения об ошибке.
  */
 
@@ -12,7 +12,7 @@ import path from "node:path";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Каталог данных наставника (на Windows %LOCALAPPDATA%\music_mentor), MM_ROOT — для тестов. */
+/** Каталог данных агента (на Windows %LOCALAPPDATA%\music_mentor), MM_ROOT — для тестов. */
 export function mmRoot(env: NodeJS.ProcessEnv = process.env): string {
 	const fixed = env.MM_ROOT?.trim();
 	if (fixed) return fixed;
@@ -42,6 +42,6 @@ export function markRun(file: string, now: Date = new Date()): void {
 		mkdirSync(path.dirname(file), { recursive: true });
 		writeFileSync(file, `${now.toISOString()}\n`);
 	} catch {
-		// данных наставника нет прав — тихо
+		// данных агента нет прав — тихо
 	}
 }

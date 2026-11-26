@@ -23,7 +23,7 @@ function Invoke-ChangeKey {
 	Set-DeepSeekAuth -Path $p.Auth -Key $key
 	$key = $null
 	Write-MmHost "Готово: $($r.Text)." 'Green'
-	Write-MmHost 'Новый ключ заработает при следующем запуске наставника.'
+	Write-MmHost 'Новый ключ заработает при следующем запуске агента.'
 }
 
 try {

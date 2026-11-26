@@ -208,6 +208,8 @@ function Set-PiSettings {
 	Set-JsonProp $s 'defaultModel' 'deepseek-v4-pro'
 	Set-JsonProp $s 'quietStartup' $true
 	Set-JsonProp $s 'enabledModels' @('deepseek/deepseek-v4-pro', 'deepseek/deepseek-flash')
+	# Ученику нужен ответ, а не рассуждения модели: блоки мыслей скрыты (Ctrl+T их вернёт). T1909.
+	Set-JsonProp $s 'hideThinkingBlock' $true
 	if ($ShellPath) { Set-JsonProp $s 'shellPath' $ShellPath }
 	Write-JsonFile $Path $s
 }
@@ -651,8 +653,8 @@ function Get-MmLearnerDirs {
 	# Чьё что в шаблонной рабочей папке — одна таблица, здесь и только здесь.
 	#   файлы ученика — всё внутри этих папок (профиль, журнал, снимки, заметки, упражнения):
 	#                    создаются, только если их нет; существующие не перезаписываются НИКОГДА;
-	#   файлы наставника — всё остальное из template/ (AGENTS.md, будущие скиллы и knowledge):
-	#                    при обновлении заменяются новой версией (роль наставника меняется от версии к версии).
+	#   файлы агента — всё остальное из template/ (AGENTS.md, будущие скиллы и knowledge):
+	#                    при обновлении заменяются новой версией (роль агента меняется от версии к версии).
 	# Файлы рабочей папки, которых нет в шаблоне, не удаляются и не трогаются.
 	return @('learner', 'notes')
 }
@@ -667,7 +669,7 @@ function Get-TemplateOwner {
 
 function Get-WorkspaceTemplatePlan {
 	# Чистая функция: что делать с каждым файлом шаблона в рабочей папке.
-	# Возвращает список @{ Rel; Owner; Action }, Action = 'write' (наставника) | 'create' | 'keep' (ученика).
+	# Возвращает список @{ Rel; Owner; Action }, Action = 'write' (агента) | 'create' | 'keep' (ученика).
 	param([string]$Template, [string]$Workspace, [scriptblock]$Exists)
 	if (-not $Exists) { $Exists = { param($p) Test-Path -LiteralPath $p } }
 	if (-not (Test-Path -LiteralPath $Template)) { throw "нет шаблона рабочей папки: $Template" }
@@ -690,7 +692,7 @@ function Test-SameFileContent {
 }
 
 function Copy-WorkspaceTemplate {
-	# Шаг 7 установщика и обновление. Файлы наставника перезаписываются (одинаковые не трогаем,
+	# Шаг 7 установщика и обновление. Файлы агента перезаписываются (одинаковые не трогаем,
 	# чтобы повторный запуск был «актуальна»), файлы ученика только досоздаются (см. Get-MmLearnerDirs).
 	# Возвращает @{ Status; Mentor; Created; Kept }.
 	param([string]$Template, [string]$Workspace)
@@ -715,7 +717,7 @@ function Copy-WorkspaceTemplate {
 function Format-WorkspaceTemplateResult {
 	# Одна строка для окна: что сделали с рабочей папкой.
 	param($Result, [string]$Workspace)
-	return ('{0}: {1} (файлов наставника: {2}, новых файлов ученика: {3}, правок ученика сохранено: {4})' -f $Workspace, $Result.Status, $Result.Mentor, $Result.Created, $Result.Kept)
+	return ('{0}: {1} (файлов агента: {2}, новых файлов ученика: {3}, правок ученика сохранено: {4})' -f $Workspace, $Result.Status, $Result.Mentor, $Result.Created, $Result.Kept)
 }
 
 function Write-Launcher {
@@ -757,10 +759,45 @@ function Get-ShortcutSpecs {
 		@{ Target = $Paths.Launcher; Arguments = '' }
 	}
 	return @(
-		@{ Name = 'Музыкальный наставник'; Target = $main.Target; Arguments = $main.Arguments; WorkDir = $Paths.Workspace; Description = 'Открыть наставника по музыке' }
+		@{ Name = 'Музыкальный агент'; Target = $main.Target; Arguments = $main.Arguments; WorkDir = $Paths.Workspace; Description = 'Открыть музыкального агента' }
 		@{ Name = 'Сменить ключ DeepSeek'; Target = $ps; Arguments = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $Paths.App 'change_key.ps1')); WorkDir = $Paths.Root; Description = 'Заменить ключ DeepSeek' }
-		@{ Name = 'Обновить наставника'; Target = $ps; Arguments = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $Paths.App 'update.ps1')); WorkDir = $Paths.Root; Description = 'Обновить наставника до последней версии' }
+		@{ Name = 'Обновить агента'; Target = $ps; Arguments = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $Paths.App 'update.ps1')); WorkDir = $Paths.Root; Description = 'Обновить агента до последней версии' }
 	)
+}
+
+function Get-LegacyShortcutNames {
+	# Чистая функция: ярлыки, которые остались от прежних версий (T1909: «наставник» -> «агент»).
+	# При установке и обновлении убираем их с рабочего стола, чтобы не было двух ярлыков на одно.
+	return @('Музыкальный наставник', 'Обновить наставника')
+}
+
+function Remove-LegacyShortcuts {
+	# Убирает старые ярлыки. Возвращает имена тех, что действительно были и удалились.
+	param([string]$Desktop)
+	$gone = @()
+	foreach ($n in (Get-LegacyShortcutNames)) {
+		$lnk = Join-Path $Desktop ($n + '.lnk')
+		if (-not (Test-Path -LiteralPath $lnk)) { continue }
+		Remove-Item -LiteralPath $lnk -Force
+		$gone += $n
+	}
+	return $gone
+}
+
+function Write-MmShortcuts {
+	# Установка и обновление: лаунчер, убрать старые имена, положить текущие ярлыки.
+	# Возвращает строки для окна.
+	param($Paths, [string]$WtPath)
+	$lines = @()
+	Write-Launcher $Paths.Launcher
+	New-Item -ItemType Directory -Path $Paths.Desktop -Force | Out-Null
+	foreach ($n in (Remove-LegacyShortcuts -Desktop $Paths.Desktop)) { $lines += "убрал старый ярлык: $n" }
+	foreach ($s in (Get-ShortcutSpecs -Paths $Paths -WtPath $WtPath)) {
+		$lnk = Join-Path $Paths.Desktop ($s.Name + '.lnk')
+		New-MmShortcut -Path $lnk -Target $s.Target -Arguments $s.Arguments -WorkDir $s.WorkDir -Description $s.Description
+		$lines += $s.Name
+	}
+	return $lines
 }
 
 function Get-GitExe {
@@ -811,7 +848,7 @@ function Update-MentorApp {
 	# Обновление кода: fetch тегов -> checkout последнего стабильного тега. Возвращает @{ Changed; From; To }.
 	# `pi install` и мост — на вызывающем (update.ps1).
 	param([string]$AppDir)
-	if (-not (Test-Path -LiteralPath (Join-Path $AppDir '.git'))) { throw "в $AppDir нет репозитория наставника" }
+	if (-not (Test-Path -LiteralPath (Join-Path $AppDir '.git'))) { throw "в $AppDir нет репозитория агента" }
 	$from = Get-CurrentTag $AppDir
 	$null = Invoke-Git $AppDir @('fetch', '--tags', '--force', 'origin')
 	$latest = Get-LatestStableTag $AppDir

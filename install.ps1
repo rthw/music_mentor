@@ -314,7 +314,7 @@ function Clear-KeyFromHistory {
 }
 
 function Step-Workspace {
-	# Файлы наставника (AGENTS.md, будущие скиллы) — перезаписываются, файлы ученика — только
+	# Файлы агента (AGENTS.md, будущие скиллы) — перезаписываются, файлы ученика — только
 	# досоздаются: правило в Get-MmLearnerDirs (lib\win\common.ps1).
 	$p = Get-MmPaths
 	$r = Copy-WorkspaceTemplate -Template (Join-Path $p.App 'template') -Workspace $p.Workspace
@@ -329,16 +329,10 @@ function Step-Bridge {
 
 function Step-Shortcuts {
 	$p = Get-MmPaths
-	Write-Launcher $p.Launcher
 	$wt = Get-Command wt.exe -ErrorAction SilentlyContinue
 	$wtPath = $null
-	if ($wt) { $wtPath = $wt.Source } else { Write-Say '  Windows Terminal не найден: наставник откроется в обычном окне' }
-	New-Item -ItemType Directory -Path $p.Desktop -Force | Out-Null
-	foreach ($s in (Get-ShortcutSpecs -Paths $p -WtPath $wtPath)) {
-		$lnk = Join-Path $p.Desktop ($s.Name + '.lnk')
-		New-MmShortcut -Path $lnk -Target $s.Target -Arguments $s.Arguments -WorkDir $s.WorkDir -Description $s.Description
-		Write-Say "  $($s.Name)"
-	}
+	if ($wt) { $wtPath = $wt.Source } else { Write-Say '  Windows Terminal не найден: агент откроется в обычном окне' }
+	foreach ($l in (Write-MmShortcuts -Paths $p -WtPath $wtPath)) { Write-Say "  $l" }
 }
 
 function Step-SelfCheck {
@@ -378,22 +372,22 @@ function Start-Install {
 	# (картинок модель не видит). Ошибка скачивания — до журнала, поэтому отдельное сообщение.
 	try { Import-BootCommon } catch {
 		Write-Say ''
-		Write-Say ("Не получилось скачать общие функции наставника: {0}. Проверь интернет и запусти ту же строку ещё раз." -f $_.Exception.Message) 'Red'
+		Write-Say ("Не получилось скачать общие функции агента: {0}. Проверь интернет и запусти ту же строку ещё раз." -f $_.Exception.Message) 'Red'
 		return
 	}
 	$null = Start-MmLog 'install'
 	Write-Say ''
-	Write-Say "Музыкальный наставник: установка ($MmTag)" 'Green'
+	Write-Say "Музыкальный агент: установка ($MmTag)" 'Green'
 	Write-Say 'Это займёт несколько минут. Можно ничего не нажимать.'
 	$ok = $true
 	if (-not (Invoke-Step 1 'проверки' { Step-Checks })) { Write-Say 'Без шага 1 дальше идти нельзя.' 'Red'; Write-Say (Get-MmLogHint) 'Red'; return }
 	if (-not (Invoke-Step 2 'Git' { Step-Git })) { $ok = $false }
 	if (-not (Invoke-Step 3 'pi' { Step-Pi })) { $ok = $false }
 	if ($ok) {
-		if (-not (Invoke-Step 4 'код наставника' { Step-App })) { $ok = $false }
+		if (-not (Invoke-Step 4 'код агента' { Step-App })) { $ok = $false }
 	} else {
-		Write-Say 'Шаг 4 (код наставника) пропущен: сначала нужны шаги 2 и 3.' 'Red'
-		$script:MmFailed += '4 (код наставника)'
+		Write-Say 'Шаг 4 (код агента) пропущен: сначала нужны шаги 2 и 3.' 'Red'
+		$script:MmFailed += '4 (код агента)'
 	}
 	if (-not $ok) {
 		Write-Say ''
@@ -410,8 +404,8 @@ function Start-Install {
 	$null = Invoke-Step 10 'самопроверка' { Step-SelfCheck }
 	Write-Say ''
 	if ($script:MmFailed.Count -eq 0) {
-		Write-Say 'Готово. На рабочем столе три ярлыка: «Музыкальный наставник», «Сменить ключ DeepSeek», «Обновить наставника».' 'Green'
-		Write-Say 'Один раз включи мост в Ableton Live: Preferences -> MIDI -> Control Surface -> MentorBridge (Input и Output: None). Наставник сам подскажет, где это в твоей версии.'
+		Write-Say 'Готово. На рабочем столе три ярлыка: «Музыкальный агент», «Сменить ключ DeepSeek», «Обновить агента».' 'Green'
+		Write-Say 'Один раз включи мост в Ableton Live: Options -> Settings… (в старых версиях Preferences) -> вкладка MIDI -> Control Surface -> MentorBridge (Input и Output: None). Агент сам подскажет, где это в твоей версии.'
 		Write-Say ("Журнал установки: {0}" -f (Get-MmLogPath))
 	} else {
 		Write-Say ("Установка закончена с ошибками. Не получилось: {0}." -f ($script:MmFailed -join ', ')) 'Red'
