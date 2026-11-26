@@ -56,6 +56,8 @@ interface Row {
 	level: EarLevel;
 	/** Ответ ещё не прозвучал — задание задано, но не проверено. */
 	right?: boolean;
+	/** Ученик сам попросил пропустить задание. */
+	skipped?: boolean;
 }
 
 function readProjectFile(cwd: string, file: string): Project {
@@ -88,8 +90,9 @@ function summaryOf(rows: Row[]): string {
 		if (r.right) acc.right++;
 		byKind.set(r.kind, acc);
 	}
+	const skipped = rows.filter((r) => r.skipped).length;
 	const parts = [...byKind].map(([kind, v]) => `${KIND_TITLES[kind]} — ${v.asked} задан${v.asked === 1 ? "о" : "о"}, верно ${v.right} из ${v.answered}`);
-	return `Заданий ${rows.length}, верно ${right}. По видам: ${parts.join("; ")}.`;
+	return `Заданий ${rows.length}, верно ${right}${skipped ? `, пропущено ${skipped}` : ""}. По видам: ${parts.join("; ")}.`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -142,19 +145,31 @@ export default function (pi: ExtensionAPI) {
 			"Дать ученику задание на слух из ЕГО проекта и сыграть его в Live: отдельный трек «Подсказка: Слух», клип, запуск. " +
 			"Виды: interval (интервал), mode (мажор/минор), degree (ступень его последовательности I/IV/V/vi), bass (какая нота баса изменилась), " +
 			"dictation (2–4 ноты — ученик наигрывает на клавиатуре). Уровни 1–3: от широких интервалов к узким, вариантов и нот больше. " +
-			"Правильный ответ инструмент НЕ возвращает: он ждёт в сессии и проверяется ear_answer. " +
-			"Ноты задания не читай через live_clip_notes — это подглядывание, ответ узнаешь только на ear_answer.",
+			"Правильный ответ инструмент НЕ возвращает: он ждёт в сессии и проверяется ear_answer — своего ответа " +
+			"ты не знаешь и не соглашайся с учеником сам. Ноты задания не читай через live_clip_notes — это " +
+			"подглядывание, ответ узнаешь только на ear_answer. Пока текущее задание не проверено, новое не даётся: " +
+			"сначала ear_answer (или ear_replay, если просит повторить); пропустить — только если ученик сам просит, " +
+			"с skip: true.",
 		promptSnippet: "Задание на слух: сыграть в Live, ответ проверяется ear_answer",
 		parameters: Type.Object({
 			path: Type.Optional(Type.String({ description: ".als ученика; без него — самый свежий его проект" })),
 			kind: Type.Optional(KIND_PARAM),
 			level: Type.Optional(Type.Number({ description: "1 — широко и просто, 2 — средние, 3 — узкие интервалы и больше вариантов" })),
+			skip: Type.Optional(Type.Boolean({ description: "пропустить неотвеченное задание — только если ученик сам попросил" })),
 		}),
 		...quietRender(
 			(a) => (a?.kind === "dictation" ? "Готовлю диктант на слух…" : "Готовлю задание на слух…"),
 			(r) => (r?.details?.number ? `♪ Задание ${r.details.number}: ${r.details.title}` : "задание сыграно"),
 		),
 		async execute(_id, p, _s, _u, ctx) {
+			if (current && !current.answered) {
+				if (!p.skip) {
+					throw new Error(
+						`Задание ${current.number} ещё не проверено. Сначала ear_answer с ответом ученика (или ear_replay, если просит повторить). Новое задание или пропуск — только осознанно: если он сам просит пропустить, повтори с skip: true.`,
+					);
+				}
+				rows[current.row].skipped = true;
+			}
 			const level = (([1, 2, 3] as EarLevel[]).includes(p.level as EarLevel) ? p.level : (current ? current.task.level : 1)) as EarLevel;
 			const project = pickProject(ctx.cwd, p.path);
 			const material = buildMaterial(project);
@@ -193,7 +208,9 @@ export default function (pi: ExtensionAPI) {
 		name: "ear_answer",
 		label: "Ответ на задание",
 		description:
-			"Проверить ответ ученика на текущее задание на слух: верно/нет, правильный ответ и почему. " +
+			"Проверить ответ ученика на текущее задание на слух: верно/нет, правильный ответ и почему. Это единственный " +
+			"способ узнать правильный ответ — самого ответа не знает ни модель, ни ученик до проверки; не соглашайся " +
+			"с его словами «сам», всегда вызывай этот инструмент. " +
 			"Для ответа словами — answer («квинта», «минор», «IV», «A1»). Для диктанта — то, что он сыграл: live_track (последний клип на его треке) или played_notes.",
 		promptSnippet: "Проверить ответ на задание на слух (верно/нет)",
 		parameters: Type.Object({
@@ -252,6 +269,7 @@ export default function (pi: ExtensionAPI) {
 
 			current.answered = { given: p.answer ?? "сыграно", right };
 			rows[current.row].right = right;
+			delete rows[current.row].skipped;
 			const lines = [verdict];
 			if (body) lines.push(body);
 			lines.push(extra);

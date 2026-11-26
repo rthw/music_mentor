@@ -376,6 +376,9 @@ function tools(port: number) {
 
 const run = (t: any, params: object, cwd: string) => t.execute("1", params, undefined, undefined, { cwd });
 
+/** Пропустить неотвеченное задание (как если бы ученик сам попросил). */
+const assignor = (t: any, params: object, cwd: string) => t.execute("1", { ...params, skip: true }, undefined, undefined, { cwd });
+
 test("ear.ts: четыре инструмента", () => {
 	assert.deepEqual([...tools(1).keys()], ["ear_next", "ear_answer", "ear_replay", "ear_finish"]);
 });
@@ -467,6 +470,10 @@ test("ear_answer: ошибки — до задания и без данных д
 		await run(t.get("ear_next"), { path: "Ночь.als", kind: "dictation", level: 1 }, dir);
 		await assert.rejects(run(t.get("ear_answer"), {}, dir), /Диктант проверяется по игре/);
 		await assert.rejects(run(t.get("ear_answer"), { answer: "что-то" }, dir), /Сначала сыграй|Диктант проверяется по игре|Не вижу ответа/);
+		// неотвеченное задание не даёт нового, пока не попросят пропустить
+		await assert.rejects(run(t.get("ear_next"), { path: "Ночь.als", kind: "interval" }, dir), /ещё не проверено/);
+		const skipped = await run(t.get("ear_next"), { path: "Ночь.als", kind: "interval", skip: true }, dir);
+		assert.match(skipped.content[0].text, /♪ Задание 2/);
 	} finally {
 		live.close();
 	}
@@ -515,8 +522,9 @@ test("ear_finish: убирает только свой трек и отдаёт 
 	try {
 		const t = tools(live.port);
 		// два задания подряд — второе берёт следующий свободный слот того же трека
+		// (первое считается пропущенным: неотвеченное задание новое не пускает)
 		await run(t.get("ear_next"), { path: "Ночь.als", kind: "interval" }, dir);
-		await run(t.get("ear_next"), { path: "Ночь.als", kind: "mode" }, dir);
+		await assignor(t.get("ear_next"), { path: "Ночь.als", kind: "mode" }, dir);
 		const slots = live.seen.filter((r) => r.cmd === "add_clip").map((r) => r.slot);
 		assert.deepEqual(slots, [0, 1], "слоты не перезаписываются");
 		const before = live.tracks.map((t2) => t2.name);
