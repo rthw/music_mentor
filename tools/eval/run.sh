@@ -144,7 +144,7 @@ run_one() { # $1 = файл сценария, $2 = first|second|play|ear|sound
 			MM_ROOT="$WORKROOT/mm-root-$name" \
 			MM_LIVE_HOST=127.0.0.1 \
 			MM_LIVE_PORT=9878 \
-			timeout "$TIMEOUT" "$PI" -p --session-id "mm-eval-$name" "$prompt"
+			timeout "$TIMEOUT" "$PI" -p --session-id "mm-eval-$name" "$prompt" </dev/null
 		) >>"$log" 2>&1
 		one=$?
 		if [ $one -ne 0 ]; then
@@ -182,7 +182,7 @@ mkdir -p "$WORKROOT/skillcheck"
 	PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0 \
 	MM_EVAL_PROMPT_DUMP="$WORKROOT/prompt.txt" \
 	MM_ROOT="$WORKROOT/mm-root-skillcheck" \
-	timeout "$TIMEOUT" "$PI" -p --no-session -e "$REPO/tools/eval/dump_prompt.ts" "ок" >/dev/null 2>&1
+	timeout "$TIMEOUT" "$PI" -p --no-session -e "$REPO/tools/eval/dump_prompt.ts" "ок" </dev/null >/dev/null 2>&1
 ) || echo "   pi не отработал для проверки скилла"
 {
 	echo "# Виден ли скилл mentor в сессии pi (блок <available_skills> системного промпта)"
