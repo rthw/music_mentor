@@ -257,7 +257,7 @@ function Step-Settings {
 	$bash = Find-GitBash
 	# pi сам ищет Git Bash только в Program Files; если git стоит в профиле пользователя, говорим ему путь.
 	if ($bash -and ($bash -notlike "$env:ProgramFiles*") -and ($bash -notlike "${env:ProgramFiles(x86)}*")) { $shell = $bash }
-	Set-PiSettings -Path $p.Settings -ShellPath $shell
+	Set-PiSettings -Path $p.Settings -ShellPath $shell -Workspace $p.Workspace
 	Write-Say "  $($p.Settings)"
 	Write-Say '  Shift+Enter в Windows Terminal pi распознаёт сам, настройки терминала не трогаю.'
 }

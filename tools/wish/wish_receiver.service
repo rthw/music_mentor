@@ -1,0 +1,10 @@
+[Unit]
+Description=music_mentor: приёмник заявок (127.0.0.1:8793, /api/wish за Caddy present)
+
+[Service]
+ExecStart=%h/.local/share/mise/shims/node %h/development/music_mentor/tools/wish/wish_receiver.mjs
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,16 @@
+# Сайт present: статика открытки и приёмник заявок на /api/*. Запускает present_site.service.
+{
+	admin off
+	auto_https off
+}
+
+:8792 {
+	bind 127.0.0.1
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8793
+	}
+	handle {
+		root * {env.HOME}/.local/share/present/www
+		file_server
+	}
+}

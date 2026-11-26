@@ -200,9 +200,44 @@ function Write-JsonFile {
 	Write-Utf8NoBom $Path ((ConvertTo-Json -InputObject $Obj -Depth 10) + "`n")
 }
 
+function Get-PiEntrySource {
+	# Путь пакета из элемента settings.packages: строка или объект {source}.
+	param($Entry)
+	if ($Entry -is [string]) { return $Entry }
+	if ($Entry -and $Entry.PSObject.Properties['source']) { return [string]$Entry.source }
+	return ''
+}
+
+function Set-PiGrowSettings {
+	# T1914: агент растёт. Рецепты ученика — источник скиллов (`skills`), свои функции — локальный пакет pi
+	# (`packages`), оба внутри learner/, который обновление не перезаписывает. Файл-метка
+	# learner\my_tools_disabled (аварийный выключатель) важнее: пока он есть, пакет не подключается.
+	# Чужие записи не трогаем; старые пути к тем же папкам (рабочая папка переехала) заменяем.
+	param($Settings, [string]$Workspace)
+	$recipes = Join-Rel $Workspace 'learner\recipes'
+	$tools = Join-Rel $Workspace 'learner\my_tools'
+	$flag = Join-Rel $Workspace 'learner\my_tools_disabled'
+	$skills = @()
+	if ($Settings.PSObject.Properties['skills']) {
+		foreach ($e in @($Settings.skills)) { if ($e -and (([string]$e -replace '\\', '/') -notmatch '(^|/)learner/recipes/?$')) { $skills += $e } }
+	}
+	$skills += $recipes
+	Set-JsonProp $Settings 'skills' $skills
+	$pkgs = @()
+	if ($Settings.PSObject.Properties['packages']) {
+		foreach ($e in @($Settings.packages)) {
+			$src = Get-PiEntrySource $e
+			if ($src -and ($src -replace '\\', '/') -match '(^|/)learner/my_tools/?$') { continue }
+			if ($e) { $pkgs += $e }
+		}
+	}
+	if (-not (Test-Path -LiteralPath $flag)) { $pkgs += $tools }
+	Set-JsonProp $Settings 'packages' $pkgs
+}
+
 function Set-PiSettings {
 	# Слить наши настройки в settings.json pi, не трогая чужие поля (например packages от `pi install`).
-	param([string]$Path, [string]$ShellPath)
+	param([string]$Path, [string]$ShellPath, [string]$Workspace)
 	$s = Read-JsonFile $Path
 	Set-JsonProp $s 'defaultProvider' 'deepseek'
 	Set-JsonProp $s 'defaultModel' 'deepseek-v4-pro'
@@ -211,6 +246,7 @@ function Set-PiSettings {
 	# Ученику нужен ответ, а не рассуждения модели: блоки мыслей скрыты (Ctrl+T их вернёт). T1909.
 	Set-JsonProp $s 'hideThinkingBlock' $true
 	if ($ShellPath) { Set-JsonProp $s 'shellPath' $ShellPath }
+	if ($Workspace) { Set-PiGrowSettings -Settings $s -Workspace $Workspace }
 	Write-JsonFile $Path $s
 }
 
@@ -722,12 +758,41 @@ function Format-WorkspaceTemplateResult {
 
 function Write-Launcher {
 	# start_mentor.cmd: PATH с нашим node/npm и запуск pi. Только ASCII: пути берутся из переменных окружения.
+	# Аварийный выключатель своих функций (T1914): если pi закончился с кодом != 0, лаунчер зовёт
+	# lib\mm\guard.ts; тот проверяет, не расширение из learner\my_tools ли виновато, и при «да» выключает пакет,
+	# печатает одну строку и возвращает 10 — тогда pi запускается ещё раз. Нет guard.ts (старое приложение) — как раньше.
 	param([string]$Path)
 	$p = Get-MmPaths
 	$root = $p.Root
 	$def = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'music_mentor' } else { '' }
 	$envRoot = if ($root -ieq $def) { '%LOCALAPPDATA%\music_mentor' } else { $root }
-	$text = "@echo off`r`nset `"PATH=$envRoot\node;$envRoot\npm;%PATH%`"`r`nrem pi version is pinned by the installer: no self-update banner`r`nset `"PI_SKIP_VERSION_CHECK=1`"`r`n`"$envRoot\npm\pi.cmd`" %*`r`n"
+	$lines = @(
+		'@echo off'
+		"set `"PATH=$envRoot\node;$envRoot\npm;%PATH%`""
+		'rem pi version is pinned by the installer: no self-update banner'
+		'set "PI_SKIP_VERSION_CHECK=1"'
+		"set `"MM_PI=$envRoot\npm\pi.cmd`""
+		"set `"MM_GUARD=$envRoot\app\lib\mm\guard.ts`""
+		'if not exist "%MM_GUARD%" goto plain'
+		'set "MM_T0="'
+		'for /f %%t in (''node -e "console.log(Date.now())"'') do set "MM_T0=%%t"'
+		'"%MM_PI%" %*'
+		'set "MM_RC=%ERRORLEVEL%"'
+		'if "%MM_RC%"=="0" goto done'
+		'chcp 65001 >nul'
+		'node "%MM_GUARD%" %MM_RC% %MM_T0%'
+		'if errorlevel 10 goto retry'
+		'goto done'
+		':retry'
+		'rem the guard switched my_tools off and said so; give the line a moment before the window redraws'
+		'ping -n 4 127.0.0.1 >nul'
+		'"%MM_PI%" %*'
+		'goto done'
+		':plain'
+		'"%MM_PI%" %*'
+		':done'
+	)
+	$text = ($lines -join "`r`n") + "`r`n"
 	[IO.File]::WriteAllText($Path, $text, (New-Object Text.ASCIIEncoding))
 }
 

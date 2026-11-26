@@ -119,6 +119,24 @@ Check 'обновление: строка для окна' ((Format-WorkspaceTem
 $plan = @(Get-WorkspaceTemplatePlan -Template $tpl2 -Workspace $ws)
 Check 'план: у файлов агента write, у ученика keep' ((@($plan | Where-Object { $_.Owner -eq 'mentor' -and $_.Action -ne 'write' }).Count -eq 0) -and (@($plan | Where-Object { $_.Owner -eq 'learner' -and $_.Action -ne 'keep' }).Count -eq 0))
 
+# T1914: рецепты и свои функции ученика живут в learner/ и переживают обновление.
+Check 'шаблон: learner/recipes и learner/my_tools/package.json — ученика' ((Get-TemplateOwner 'learner/recipes/.gitkeep') -eq 'learner' -and (Get-TemplateOwner 'learner/my_tools/package.json') -eq 'learner' -and (Get-TemplateOwner 'learner/my_tools/extensions/x.ts') -eq 'learner')
+Check 'рабочая папка: recipes/ и my_tools/ созданы шаблоном' ((Test-Path (Join-Path $ws 'learner/recipes')) -and (Test-Path (Join-Path $ws 'learner/my_tools/package.json')) -and (Test-Path (Join-Path $ws 'learner/my_tools/extensions')))
+New-Item -ItemType Directory -Path (Join-Path $ws 'learner/recipes/sidechain-kick') -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $ws 'learner/recipes/sidechain-kick/SKILL.md') -Value 'мой рецепт'
+Set-Content -LiteralPath (Join-Path $ws 'learner/my_tools/extensions/track_minutes.ts') -Value 'моя функция'
+Set-Content -LiteralPath (Join-Path $ws 'learner/my_tools/package.json') -Value '{"name":"правка ученика"}'
+Set-Content -LiteralPath (Join-Path $ws 'learner/wishes.md') -Value 'заявка ждёт'
+$tpl3 = Join-Path $tmp 'tpl3'
+Copy-Item -LiteralPath $tpl2 -Destination $tpl3 -Recurse
+Set-Content -LiteralPath (Join-Path $tpl3 'AGENTS.md') -Value 'версия 3'
+Set-Content -LiteralPath (Join-Path $tpl3 'learner/my_tools/package.json') -Value '{"name":"из шаблона v3"}'
+$r4 = Copy-WorkspaceTemplate -Template $tpl3 -Workspace $ws
+Check 'обновление: рецепт ученика на месте' ((Get-Content -Raw (Join-Path $ws 'learner/recipes/sidechain-kick/SKILL.md')).Trim() -eq 'мой рецепт')
+Check 'обновление: своя функция на месте' ((Get-Content -Raw (Join-Path $ws 'learner/my_tools/extensions/track_minutes.ts')).Trim() -eq 'моя функция')
+Check 'обновление: package.json песочницы не перезаписан шаблоном' ((Get-Content -Raw (Join-Path $ws 'learner/my_tools/package.json')) -match 'правка ученика')
+Check 'обновление: wishes.md цел, а AGENTS.md обновлён' ((Get-Content -Raw (Join-Path $ws 'learner/wishes.md')).Trim() -eq 'заявка ждёт' -and (Get-Content -Raw (Join-Path $ws 'AGENTS.md')).Trim() -eq 'версия 3')
+
 # --- настройки pi и ключ ------------------------------------------------------------------------------------
 $st = Join-Path $tmp 'agent/settings.json'
 New-Item -ItemType Directory -Force -Path (Split-Path $st) | Out-Null
@@ -135,6 +153,35 @@ Set-PiSettings -Path $st -ShellPath 'C:\Users\a\AppData\Local\Programs\Git\bin\b
 Check 'settings: shellPath' ((Get-Content -Raw $st | ConvertFrom-Json).shellPath -like '*bash.exe')
 $bytes = [IO.File]::ReadAllBytes($st)
 Check 'settings: без BOM' (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB))
+# T1914: settings подключает рецепты (skills) и my_tools (packages), чужое не трогает, метка выключения важнее.
+$st2 = Join-Path $tmp 'agent2/settings.json'
+New-Item -ItemType Directory -Force -Path (Split-Path $st2) | Out-Null
+[IO.File]::WriteAllText($st2, '{"packages":["C:\\app\\music_mentor",{"source":"npm:x","skills":[]}],"skills":["C:\\other\\skills","C:\\Old\\learner\\recipes"],"theme":"dark"}')
+Set-PiSettings -Path $st2 -Workspace $ws
+$j2 = Get-Content -Raw $st2 | ConvertFrom-Json
+$toolsDir = Join-Rel $ws 'learner\my_tools'
+$recDir = Join-Rel $ws 'learner\recipes'
+Check 'settings: my_tools подключён пакетом, чужие пакеты целы' (@($j2.packages).Count -eq 3 -and $j2.packages[0] -eq 'C:\app\music_mentor' -and $j2.packages[1].source -eq 'npm:x' -and $j2.packages[2] -eq $toolsDir) ($j2.packages | Out-String)
+Check 'settings: рецепты подключены как skills, старый путь заменён, чужой цел' (@($j2.skills).Count -eq 2 -and $j2.skills[0] -eq 'C:\other\skills' -and $j2.skills[1] -eq $recDir) ($j2.skills | Out-String)
+Check 'settings: тема цела' ($j2.theme -eq 'dark')
+$before2 = Get-Content -Raw $st2
+Set-PiSettings -Path $st2 -Workspace $ws
+Check 'settings: с рабочей папкой тоже идемпотентно, без дублей' ((Get-Content -Raw $st2) -eq $before2)
+Set-Content -LiteralPath (Join-Path $ws 'learner/my_tools_disabled') -Value 'сломалось'
+Set-PiSettings -Path $st2 -Workspace $ws
+$j3 = Get-Content -Raw $st2 | ConvertFrom-Json
+Check 'settings: есть метка выключения — my_tools не возвращается обновлением, рецепты остаются' (@($j3.packages).Count -eq 2 -and @($j3.packages | Where-Object { "$_" -like '*my_tools' }).Count -eq 0 -and $j3.skills[1] -eq $recDir)
+Remove-Item -LiteralPath (Join-Path $ws 'learner/my_tools_disabled')
+Set-PiSettings -Path $st2 -Workspace $ws
+Check 'settings: метки нет — пакет снова на месте' (@((Get-Content -Raw $st2 | ConvertFrom-Json).packages).Count -eq 3)
+$stEmpty = Join-Path $tmp 'agent3/settings.json'
+New-Item -ItemType Directory -Force -Path (Split-Path $stEmpty) | Out-Null
+Set-PiSettings -Path $stEmpty -Workspace $ws
+$j4 = Get-Content -Raw $stEmpty | ConvertFrom-Json
+Check 'settings: на пустом файле packages и skills — массивы из одного элемента' ((Get-Content -Raw $stEmpty) -match '"packages":\s*\[' -and (Get-Content -Raw $stEmpty) -match '"skills":\s*\[' -and $j4.packages.Count -ge 1)
+$instSrc = Get-Content -Raw (Join-Path $repo 'install.ps1')
+$updSrc2 = Get-Content -Raw (Join-Path $repo 'update.ps1')
+Check 'install.ps1 и update.ps1 передают рабочую папку в Set-PiSettings' ($instSrc -match 'Set-PiSettings[^\r\n]*-Workspace' -and $updSrc2 -match 'Set-PiSettings[^\r\n]*-Workspace')
 $au = Join-Path $tmp 'agent/auth.json'
 $fake = 'sk-TESTKEY' + 'abcdef0123456789'
 [IO.File]::WriteAllText($au, '{"anthropic":{"type":"api' + '_key","key":"zzz"}}')
@@ -162,6 +209,9 @@ Check 'ярлыки: без wt — лаунчер напрямую' ((@(Get-Shor
 Check 'ярлыки: change_key и update через -File' ($sp[1].Arguments -like '*change_key.ps1"' -and $sp[2].Arguments -like '*update.ps1"')
 Write-Launcher (Join-Path $tmp 'l.cmd')
 Check 'лаунчер: ASCII, зовёт pi.cmd' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'pi\.cmd' -and -not ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match '[^\x00-\x7F]'))
+$launcher = Get-Content -Raw (Join-Path $tmp 'l.cmd')
+Check 'лаунчер: аварийный выключатель — guard.ts, код 10 -> повтор, строка без кириллицы' ($launcher -match 'guard\.ts' -and $launcher -match 'if errorlevel 10 goto retry' -and $launcher -match 'MM_PI=' -and $launcher -match 'chcp 65001' -and $launcher -match ':plain')
+Check 'лаунчер: без guard.ts (старое приложение) запускает pi как раньше' ($launcher -match 'if not exist "%MM_GUARD%" goto plain')
 Check 'лаунчер: баннер обновления pi выключен (PI_SKIP_VERSION_CHECK)' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'set "PI_SKIP_VERSION_CHECK=1"')
 
 # --- обновление по тегам --------------------------------------------------------------------------------------------

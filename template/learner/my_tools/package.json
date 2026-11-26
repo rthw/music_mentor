@@ -1,0 +1,12 @@
+{
+  "name": "mm-my-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Свои функции ученика: расширения pi, которые агент дописал по его просьбе",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}
