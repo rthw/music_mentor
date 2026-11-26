@@ -82,7 +82,17 @@ h1 {
 }
 .from { margin: 0 auto 18px; max-width: 420px; font: italic 500 21px/1.35 "Cormorant Garamond", Georgia, serif; }
 .from span { display: block; margin-top: 6px; font-size: 17px; color: var(--accent); }
-.lead { margin: 0 auto 30px; max-width: 400px; color: var(--muted); }
+.lead { margin: 0 auto 22px; max-width: 420px; color: var(--muted); }
+.can { list-style: none; margin: 0 auto 30px; padding: 18px 0 0; max-width: 460px; border-top: 1px solid var(--line);
+	display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; text-align: left; font-size: 14px; line-height: 1.4; }
+.can li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
+.can b { display: block; font-weight: 600; }
+.can span { color: var(--muted); }
+.can i { font-style: normal; color: var(--accent); font: 600 18px/1.1 "Cormorant Garamond", serif; text-align: center; }
+.guide .say { list-style: none; padding: 0; margin: 0 0 8px; }
+.guide .say li { margin: 0 0 8px; padding: 8px 12px; background: var(--bg); border-radius: 10px; }
+.guide .say q { font-weight: 600; quotes: "«" "»"; }
+.guide .say span { color: var(--muted); }
 button, .btn {
 	font: 600 17px/1 Manrope, system-ui, sans-serif;
 	border: 0;
@@ -124,7 +134,9 @@ input {
 .hidden { display: none !important; }
 a { color: var(--accent); text-decoration: none; font-weight: 600; }
 a:hover { text-decoration: underline; }
-.more { margin: 20px 0 0; text-align: center; }
+.more { margin: 22px 0 0; text-align: center; }
+.more a { display: inline-block; padding: 11px 22px; border: 1.5px solid var(--accent); border-radius: 999px; }
+.more a:hover { text-decoration: none; background: var(--card); }
 .guide { text-align: left; padding-top: 28px; }
 .guide .back { margin: 0 0 4px; font-size: 14px; }
 .guide h2 { font: 600 30px/1.15 "Cormorant Garamond", Georgia, serif; margin: 26px 0 6px; }
@@ -144,7 +156,7 @@ kbd {
 	background: var(--card);
 }
 .notwin { margin: 14px auto 0; max-width: 380px; font-size: 13px; color: var(--accent); }
-@media (max-width: 480px) { .card { padding: 44px 22px 32px; } }
+@media (max-width: 480px) { .card { padding: 44px 22px 32px; } .can { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -165,8 +177,16 @@ kbd {
 	<div class="stamp" aria-hidden="true">♫</div>
 	<h1>Музыкальный агент</h1>
 	<p class="from">Ты давно делаешь музыку — пусть теперь рядом будет кто-то, кто поможет понять, почему она звучит так, и куда расти.<span>— Макс</span></p>
-	<p class="lead">ИИ-агент: читает твои проекты Ableton и по-русски объясняет, что в них происходит: гармония, ритм, что попробовать дальше.</p>
-	<button type="button" id="dl">Скопировать</button>
+	<p class="lead">ИИ-агент для Ableton Live. Говорит по-русски, помнит, что вы делали, и каждый раз предлагает следующий шаг.</p>
+	<ul class="can">
+		<li><i>♩</i><div><b>Разбирает твои треки</b><span>гармония, бас, ритм — на твоих нотах, без сухой теории</span></div></li>
+		<li><i>♪</i><div><b>Подсказывает в Live</b><span>что нажать в твоей версии; пример кладёт отдельным треком</span></div></li>
+		<li><i>♫</i><div><b>Учит играть руками</b><span>упражнения на MIDI-клавиатуре и разбор записи: где разошёлся</span></div></li>
+		<li><i>♬</i><div><b>Тренирует слух</b><span>интервалы и аккорды из твоего же трека</span></div></li>
+		<li><i>∿</i><div><b>Смотрит на звук</b><span>громкость, муть, бочка и бас, сравнение с референсом</span></div></li>
+		<li><i>↗</i><div><b>Растёт вместе с тобой</b><span>запоминает твои приёмы, учит новое по твоей просьбе</span></div></li>
+	</ul>
+	<button type="button" id="dl">Скопировать команду установки</button>
 	<p class="sub" id="sub">Для Windows 10 и 11</p>
 	<p class="notwin hidden" id="notwin">Открой эту страницу на компьютере с Windows — ставить нужно туда.</p>
 </section>
@@ -174,11 +194,11 @@ kbd {
 <section class="steps hidden" id="steps">
 	<ol>
 		<li>Нажми кнопку выше, потом на клавиатуре <kbd>Win</kbd>+<kbd>R</kbd>.</li>
-		<li>В появившемся окошке — <kbd>Ctrl</kbd>+<kbd>V</kbd> и <kbd>Enter</kbd>. Откроется окно установки: подожди минут десять, нажимать ничего не нужно.</li>
+		<li>В появившемся окошке — <kbd>Ctrl</kbd>+<kbd>V</kbd> и <kbd>Enter</kbd>. Откроется окно установки: подожди несколько минут, нажимать ничего не нужно.</li>
 		<li>На рабочем столе появится «Музыкальный агент». Открой и просто пиши ему.</li>
 	</ol>
 	<p class="foot">Если что-то не получилось — установщик положит путь к журналу в буфер обмена, пришли мне этот файл.</p>
-	<p class="more"><a href="#guide" id="toGuide">Как с ним работать →</a></p>
+	<p class="more"><a href="#guide" id="toGuide">Как с ним работать и что попросить →</a></p>
 </section>
 
 <section class="card guide hidden" id="guide">
@@ -186,7 +206,19 @@ kbd {
 	<h2>Как с ним работать</h2>
 
 	<h3>Разговор</h3>
-	<p>Открой «Музыкальный агент» на рабочем столе и пиши обычными словами, как другу. <kbd>Enter</kbd> — отправить. В первый раз он сам спросит, как тебя зовут и что ты любишь слушать.</p>
+	<p>Открой «Музыкальный агент» на рабочем столе и пиши обычными словами, как другу. <kbd>Enter</kbd> — отправить. В первый раз он сам заглянет в твои проекты и спросит, чего тебе хочется: доделать трек, научиться играть, разобраться в теории. Отвечай как есть — он подстроится.</p>
+	<p class="note">Служебные строки вроде «Смотрю проект…» он сворачивает. Подробности раскрываются по <kbd>Ctrl</kbd>+<kbd>O</kbd>.</p>
+
+	<h3>Что можно попросить</h3>
+	<ul class="say">
+		<li><q>Посмотри мои проекты</q> <span>— найдёт свежие и скажет, что заметил</span></li>
+		<li><q>Что у меня с гармонией в «…»?</q> <span>— разбор на твоих нотах</span></li>
+		<li><q>Сделай мне бас под этот трек</q> <span>— положит пример отдельным треком в Live</span></li>
+		<li><q>Хочу научиться играть аккорды этого трека</q> <span>— упражнение и разбор твоей записи</span></li>
+		<li><q>Давай потренируем слух</q> <span>— 5–10 коротких заданий в Live</span></li>
+		<li><q>Почему трек звучит мутно?</q> <span>— попросит экспорт в wav и посмотрит на звук</span></li>
+		<li><q>Как в Live сделать сайдчейн?</q> <span>— по шагам, в твоей версии</span></li>
+	</ul>
 
 	<h3>Как показать трек</h3>
 	<p>Проще всего сказать: «посмотри мои проекты». Он сам найдёт их в «Документах» и на рабочем столе.</p>
@@ -270,7 +302,7 @@ $("dl").addEventListener("click", async () => {
 	try { await navigator.clipboard.writeText(payload); ok = true; } catch (_) { ok = copyFallback(payload); }
 	$("dl").textContent = ok ? "Скопировано ✓" : "Не вышло — нажми ещё раз";
 	$("sub").textContent = ok ? "Теперь Win+R, Ctrl+V и Enter" : "Для Windows 10 и 11";
-	setTimeout(() => { $("dl").textContent = "Скопировать"; }, 4000);
+	setTimeout(() => { $("dl").textContent = "Скопировать команду установки"; }, 4000);
 });
 </script>
 </body>
