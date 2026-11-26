@@ -5,7 +5,7 @@
 # поэтому у прогона свои HOME и PI_CODING_AGENT_DIR, а рабочая папка — копия template/.
 #
 # Запуск (ключ берётся из хранилища и передаётся только в окружение процесса):
-#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 5
+#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 7
 #   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03      # только выбранные
 #
 # Ответы: ~/.local/state/music_mentor/eval/runs/<дата_время>/*.md (или OUT=<папка>).
@@ -36,7 +36,9 @@ if [ -z "$PI" ]; then
 fi
 
 WORKROOT="$(mktemp -d "${TMPDIR:-/tmp}/mm_eval.XXXXXX")"
+BRIDGE_PID=""
 cleanup() {
+	[ -n "$BRIDGE_PID" ] && kill "$BRIDGE_PID" 2>/dev/null
 	rm -rf "$WORKROOT"
 }
 trap cleanup EXIT
@@ -72,6 +74,7 @@ make_workspace() { # $1 = first|second|play, $2 = куда
 	local kind="$1" dest="$2" src="second_session"
 	cp -r "$REPO/template" "$dest"
 	[ "$kind" = "play" ] && src="play"
+	[ "$kind" = "ear" ] && src="ear"
 	if [ "$kind" != "first" ]; then
 		cp "$REPO/tools/eval/fixtures/$src/profile.md" "$dest/learner/profile.md"
 		cp "$REPO/tools/eval/fixtures/$src/log.jsonl" "$dest/learner/log.jsonl"
@@ -89,8 +92,19 @@ build_recording() { # $1 = папка проектов
 	fi
 }
 
-run_one() { # $1 = файл сценария, $2 = first|second|play
-	local scenario="$1" kind="$2" name ws log dir turn prompt code=0 turns=0 one=0
+run_one() { # $1 = файл сценария, $2 = first|second|play|ear
+	local scenario="$1" kind="$2" name ws log dir turn prompt code=0 turns=0 one=0 bridge_pid=""
+	# Сценарию со слухом нужен мост: настоящего Live в прогоне нет, поэтому поднимаем заглушку
+	# с тем же протоколом (tools/eval/fixtures/ear/fake_bridge.ts) и гасим её по своему PID.
+	if [ "$kind" = "ear" ]; then
+		node "$REPO/tools/eval/fixtures/ear/fake_bridge.ts" >"$WORKROOT/fake_bridge.log" 2>&1 &
+		bridge_pid=$!
+		BRIDGE_PID=$bridge_pid
+		sleep 0.5
+		if ! kill -0 "$bridge_pid" 2>/dev/null; then
+			echo "   заглушка моста не поднялась — см. $WORKROOT/fake_bridge.log" >&2
+		fi
+	fi
 	name="$(basename "$scenario" .txt)"
 	ws="$WORKROOT/work-$name"
 	dir="$WORKROOT/turns-$name"
@@ -116,6 +130,8 @@ run_one() { # $1 = файл сценария, $2 = first|second|play
 			PI_SKIP_VERSION_CHECK=1 \
 			PI_TELEMETRY=0 \
 			MM_ROOT="$WORKROOT/mm-root-$name" \
+			MM_LIVE_HOST=127.0.0.1 \
+			MM_LIVE_PORT=9878 \
 			timeout "$TIMEOUT" "$PI" -p --session-id "mm-eval-$name" "$prompt"
 		) >>"$log" 2>&1
 		one=$?
@@ -126,6 +142,7 @@ run_one() { # $1 = файл сценария, $2 = first|second|play
 			echo "   ход $turns: ок → $log"
 		fi
 	done
+	[ -n "$bridge_pid" ] && kill "$bridge_pid" 2>/dev/null
 	{
 		echo
 		echo "---"
@@ -182,5 +199,6 @@ run "$REPO/tools/eval/scenarios/03-sidechain.txt" second
 run "$REPO/tools/eval/scenarios/04-chill.txt" second
 run "$REPO/tools/eval/scenarios/05-bass.txt" second
 run "$REPO/tools/eval/scenarios/06-play.txt" play
+run "$REPO/tools/eval/scenarios/07-ear.txt" ear
 
 echo "Готово: $OUT"
