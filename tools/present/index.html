@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Открытка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+	--bg: #e9e3d8;
+	--card: #fbf7ef;
+	--ink: #2b2620;
+	--muted: #776d60;
+	--line: #d9cfbf;
+	--accent: #9c3b2a;
+	--accent-ink: #fff8f0;
+	--shadow: 0 1px 2px rgba(60, 40, 20, .08), 0 18px 40px -12px rgba(60, 40, 20, .28);
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #1b1916;
+		--card: #27241f;
+		--ink: #efe7da;
+		--muted: #a69a89;
+		--line: #3d3830;
+		--accent: #d0674f;
+		--accent-ink: #1b1916;
+		--shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 18px 40px -12px rgba(0, 0, 0, .7);
+	}
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+	min-height: 100vh;
+	background: var(--bg);
+	color: var(--ink);
+	font: 16px/1.55 Manrope, system-ui, sans-serif;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 32px 16px;
+}
+.card {
+	position: relative;
+	width: 100%;
+	max-width: 560px;
+	background: var(--card);
+	border-radius: 6px;
+	box-shadow: var(--shadow);
+	padding: 48px 40px 40px;
+	text-align: center;
+	overflow: hidden;
+}
+.staff {
+	position: absolute;
+	left: 0; right: 0; top: 22px;
+	height: 26px;
+	background: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px 6px);
+	opacity: .9;
+}
+.stamp {
+	position: absolute;
+	top: 14px; right: 16px;
+	width: 46px; height: 54px;
+	border: 2px dashed var(--accent);
+	border-radius: 3px;
+	display: grid;
+	place-items: center;
+	color: var(--accent);
+	font: 600 30px/1 "Cormorant Garamond", serif;
+	background: var(--card);
+	transform: rotate(4deg);
+}
+h1 {
+	font: 600 clamp(30px, 7vw, 42px)/1.1 "Cormorant Garamond", Georgia, serif;
+	margin: 40px 0 14px;
+	letter-spacing: .01em;
+}
+.lead { margin: 0 auto 30px; max-width: 400px; color: var(--muted); }
+button, .btn {
+	font: 600 17px/1 Manrope, system-ui, sans-serif;
+	border: 0;
+	border-radius: 999px;
+	padding: 16px 40px;
+	background: var(--accent);
+	color: var(--accent-ink);
+	cursor: pointer;
+	transition: transform .15s ease, filter .15s ease;
+}
+button:hover { filter: brightness(1.07); transform: translateY(-1px); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sub { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+.steps {
+	width: 100%;
+	max-width: 560px;
+	margin: 28px 0 0;
+	padding: 0 8px;
+	color: var(--ink);
+	font-size: 15px;
+}
+.steps ol { margin: 0; padding-left: 22px; }
+.steps li { margin: 0 0 10px; }
+.steps li::marker { color: var(--accent); font-weight: 600; }
+.steps .foot { margin: 18px 0 0; font-size: 13px; color: var(--muted); }
+.gate form { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+input {
+	width: 100%;
+	max-width: 280px;
+	font: 500 17px/1.2 Manrope, system-ui, sans-serif;
+	text-align: center;
+	padding: 13px 16px;
+	border-radius: 999px;
+	border: 1px solid var(--line);
+	background: var(--bg);
+	color: var(--ink);
+}
+.err { min-height: 1.4em; margin: 0; font-size: 14px; color: var(--accent); }
+.hidden { display: none !important; }
+.notwin { margin: 14px auto 0; max-width: 380px; font-size: 13px; color: var(--accent); }
+@media (max-width: 480px) { .card { padding: 44px 22px 32px; } }
+</style>
+</head>
+<body>
+
+<section class="card gate" id="gate">
+	<div class="staff" aria-hidden="true"></div>
+	<div class="stamp" aria-hidden="true">♫</div>
+	<h1>Тебе открытка</h1>
+	<form id="gateForm" autocomplete="off">
+		<input id="pw" type="password" placeholder="Пароль" aria-label="Пароль" autofocus>
+		<button type="submit" id="openBtn">Открыть</button>
+		<p class="err" id="err" role="alert"></p>
+	</form>
+</section>
+
+<section class="card hidden" id="present">
+	<div class="staff" aria-hidden="true"></div>
+	<div class="stamp" aria-hidden="true">♫</div>
+	<h1>Музыкальный наставник</h1>
+	<p class="lead">Читает твои проекты Ableton и по-русски объясняет, что в них происходит: гармония, ритм, что попробовать дальше.</p>
+	<button type="button" id="dl">Скачать</button>
+	<p class="sub">Для Windows 10 и 11</p>
+	<p class="notwin hidden" id="notwin">Открой эту страницу на компьютере с Windows — ставить нужно туда.</p>
+</section>
+
+<section class="steps hidden" id="steps">
+	<ol>
+		<li>Открой скачанный файл. Если Windows скажет «Система Windows защитила ваш компьютер» — нажми «Подробнее», потом «Выполнить в любом случае».</li>
+		<li>Подожди минут десять, нажимать ничего не нужно.</li>
+		<li>На рабочем столе появится «Музыкальный наставник». Открой и просто пиши ему. Как связать его с Live, он подскажет сам.</li>
+	</ol>
+	<p class="foot">Если что-то не получилось — установщик положит путь к журналу в буфер обмена, пришли мне этот файл.</p>
+</section>
+
+<script>
+const SEALED = /*__SEALED__*/null;
+const FILE = "music_mentor_setup.cmd";
+const $ = (id) => document.getElementById(id);
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+let payload = null;
+
+async function tryOpen(pw) {
+	const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw.normalize("NFC")), "PBKDF2", false, ["deriveKey"]);
+	for (const b of SEALED.boxes) {
+		const k = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: unb64(b.s), iterations: SEALED.iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+		try {
+			return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(b.i) }, k, unb64(b.c)));
+		} catch (_) { /* другой пароль */ }
+	}
+	return null;
+}
+
+$("gateForm").addEventListener("submit", async (e) => {
+	e.preventDefault();
+	const pw = $("pw").value.trim();
+	if (!pw) return;
+	$("err").textContent = "";
+	$("openBtn").disabled = true;
+	$("openBtn").textContent = "…";
+	payload = await tryOpen(pw);
+	$("openBtn").disabled = false;
+	$("openBtn").textContent = "Открыть";
+	if (!payload) { $("err").textContent = "Не тот пароль"; $("pw").select(); return; }
+	$("gate").classList.add("hidden");
+	$("present").classList.remove("hidden");
+	$("steps").classList.remove("hidden");
+	if (!/Windows/i.test(navigator.userAgent)) $("notwin").classList.remove("hidden");
+});
+
+$("dl").addEventListener("click", () => {
+	const url = URL.createObjectURL(new Blob([payload], { type: "application/octet-stream" }));
+	const a = document.createElement("a");
+	a.href = url; a.download = FILE;
+	document.body.appendChild(a); a.click(); a.remove();
+	setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+</script>
+</body>
+</html>
