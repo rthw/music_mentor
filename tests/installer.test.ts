@@ -295,3 +295,10 @@ test("запуск .ps1 с диска всегда с -ExecutionPolicy Bypass (�
 	const sc = readFileSync(path.join(ROOT, "lib/win/common.ps1"), "utf8");
 	assert.equal((sc.match(/-NoProfile -ExecutionPolicy Bypass -File/g) ?? []).length, 2, "оба ярлыка с .ps1 запускаются с Bypass");
 });
+
+test("update.ps1 обновляет настройки pi (новые поля вроде hideThinkingBlock доходят без переустановки)", () => {
+	const upd = readFileSync(path.join(ROOT, "update.ps1"), "utf8");
+	assert.match(upd, /Set-PiSettings -Path \$p\.Settings/);
+	const common = readFileSync(path.join(ROOT, "lib/win/common.ps1"), "utf8");
+	assert.match(common, /'hideThinkingBlock' \$true/);
+});

@@ -29,6 +29,9 @@ function Invoke-MentorUpdate {
 	try { $piOut = & $piCmd install $p.App 2>&1 } finally { $ErrorActionPreference = $old }
 	foreach ($l in @($piOut)) { Write-MmHost "  $l" }
 	if ($LASTEXITCODE -ne 0) { throw "pi install закончился кодом $LASTEXITCODE" }
+	# Настройки pi (модель, скрытые мысли и т.п.) — тоже наши: новые версии приносят новые поля.
+	# shellPath не передаём: Set-PiSettings его не трогает, остаётся выбор установщика.
+	Set-PiSettings -Path $p.Settings
 	# Шаблон рабочей папки: файлы агента (AGENTS.md, скиллы) заменяются, файлы ученика
 	# (learner/, notes/) только досоздаются — правки ученика не теряются.
 	$ws = Copy-WorkspaceTemplate -Template (Join-Path $p.App 'template') -Workspace $p.Workspace
