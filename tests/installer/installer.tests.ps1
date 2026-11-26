@@ -84,12 +84,38 @@ New-Item -ItemType Directory -Force -Path (Join-Path $pd10 'Ableton/Live 10 Suit
 $o10 = @(Install-Bridge -BridgeSource $src -ProgramData $pd10 -AppData $ap10 -Documents $docs -NoElevate 6>$null)
 Check 'мост: Live 10.1.5 — нужен администратор' (($o10 -join '|') -match 'нужен администратор')
 
-# --- рабочая папка ---------------------------------------------------------------------------------------
+# --- рабочая папка: чьи файлы и что делает обновление -------------------------------------------------------
+# Правило в одном месте: learner\ и notes\ — ученика (только создаются), остальное из template\ —
+# наставника (перезаписывается). Обновление не должно терять правки ученика и не должно оставлять старую роль.
+Check 'шаблон: AGENTS.md — наставника' ((Get-TemplateOwner 'AGENTS.md') -eq 'mentor')
+Check 'шаблон: learner/profile.md — ученика' ((Get-TemplateOwner 'learner/profile.md') -eq 'learner')
+Check 'шаблон: notes/x.md — ученика' ((Get-TemplateOwner (Join-Path 'notes' 'идея.md')) -eq 'learner')
+Check 'шаблон: будущие скиллы — наставника' ((Get-TemplateOwner 'skills/mentor/SKILL.md') -eq 'mentor')
 $ws = Join-Path $tmp 'Documents/music_mentor'
-$tpl = Join-Path $repo 'template'
-Check 'рабочая папка: создана' ((Copy-WorkspaceTemplate -Template $tpl -Workspace $ws) -eq 'создана' -and (Test-Path (Join-Path $ws 'AGENTS.md')) -and (Test-Path (Join-Path $ws 'learner/profile.md')) -and (Test-Path (Join-Path $ws 'notes')))
-Set-Content -LiteralPath (Join-Path $ws 'AGENTS.md') -Value 'моё'
-Check 'рабочая папка: повтор не перезаписывает' ((Copy-WorkspaceTemplate -Template $tpl -Workspace $ws) -eq 'уже' -and (Get-Content (Join-Path $ws 'AGENTS.md')) -eq 'моё')
+$tpl = Join-Path $tmp 'tpl1'
+Copy-Item -LiteralPath (Join-Path $repo 'template') -Destination $tpl -Recurse
+$r1 = Copy-WorkspaceTemplate -Template $tpl -Workspace $ws
+Check 'рабочая папка: создана целиком' ($r1.Status -eq 'создана' -and (Test-Path (Join-Path $ws 'AGENTS.md')) -and (Test-Path (Join-Path $ws 'learner/profile.md')) -and (Test-Path (Join-Path $ws 'notes/README.md')) -and $r1.Created -ge 2) ($r1 | Out-String)
+# Ученик правит профиль, пишет свою заметку и заводит свой файл.
+Set-Content -LiteralPath (Join-Path $ws 'learner/profile.md') -Value 'мой профиль'
+Set-Content -LiteralPath (Join-Path $ws 'notes/идея.md') -Value 'моя идея'
+# Вышел новый шаблон: другая роль и новый файл наставника.
+$tpl2 = Join-Path $tmp 'tpl2'
+Copy-Item -LiteralPath $tpl -Destination $tpl2 -Recurse
+Set-Content -LiteralPath (Join-Path $tpl2 'AGENTS.md') -Value 'новый AGENTS.md'
+New-Item -ItemType Directory -Path (Join-Path $tpl2 'skills/mentor') -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $tpl2 'skills/mentor/SKILL.md') -Value 'роль наставника'
+$r2 = Copy-WorkspaceTemplate -Template $tpl2 -Workspace $ws
+Check 'обновление: файл наставника перезаписан' (((Get-Content -Raw (Join-Path $ws 'AGENTS.md')).Trim()) -eq 'новый AGENTS.md')
+Check 'обновление: новый файл наставника появился' ((Get-Content -Raw (Join-Path $ws 'skills/mentor/SKILL.md')).Trim() -eq 'роль наставника')
+Check 'обновление: правка ученика в learner/profile.md цела' (((Get-Content -Raw (Join-Path $ws 'learner/profile.md')).Trim()) -eq 'мой профиль')
+Check 'обновление: новый файл ученика не удалён' (((Get-Content -Raw (Join-Path $ws 'notes/идея.md')).Trim()) -eq 'моя идея')
+Check 'обновление: статус и счётчики' ($r2.Status -eq 'обновлена' -and $r2.Mentor -ge 2 -and $r2.Kept -ge 2) ($r2 | Out-String)
+$r3 = Copy-WorkspaceTemplate -Template $tpl2 -Workspace $ws
+Check 'обновление: повтор — «актуальна», правки целы' ($r3.Status -eq 'актуальна' -and ((Get-Content -Raw (Join-Path $ws 'learner/profile.md')).Trim()) -eq 'мой профиль')
+Check 'обновление: строка для окна' ((Format-WorkspaceTemplateResult -Result $r3 -Workspace $ws) -match 'актуальна')
+$plan = @(Get-WorkspaceTemplatePlan -Template $tpl2 -Workspace $ws)
+Check 'план: у файлов наставника write, у ученика keep' ((@($plan | Where-Object { $_.Owner -eq 'mentor' -and $_.Action -ne 'write' }).Count -eq 0) -and (@($plan | Where-Object { $_.Owner -eq 'learner' -and $_.Action -ne 'keep' }).Count -eq 0))
 
 # --- настройки pi и ключ ------------------------------------------------------------------------------------
 $st = Join-Path $tmp 'agent/settings.json'
@@ -150,10 +176,60 @@ if ($git) {
 	Check 'обновление: нет репозитория — исключение, не молчание' $threw
 } else { Write-Host 'skip: git не найден, проверки обновления пропущены' }
 
+# --- журнал -----------------------------------------------------------------------------------------------------------
+$logRoot = Join-Path $tmp 'logroot'
+$logPath = Start-MmLog -Script 'install' -Root $logRoot
+Check 'журнал: файл <скрипт>_<дата-время>.log создан' ((Test-Path -LiteralPath $logPath) -and ((Split-Path -Leaf $logPath) -match '^install_\d{4}-\d{2}-\d{2}_\d{6}\.log$')) $logPath
+Write-MmHost 'строка, которую видно в окне'
+Check 'журнал: текст из окна попал в файл' ((Get-Content -Raw $logPath) -match 'строка, которую видно в окне')
+$fakeKey = 'sk-' + 'LOGTESTfakekey0123456789'
+Write-MmLog ('ключ: ' + $fakeKey)
+Write-MmHost ('Authorization: Bearer ' + $fakeKey)
+$logText = Get-Content -Raw $logPath
+Check 'журнал: ключа в файле нет' (-not $logText.Contains($fakeKey) -and $logText -notmatch 'LOGTESTfakekey')
+Check 'журнал: маска sk-… и Bearer' ((ConvertTo-MmLogSafe ('sk-' + 'abcdefabcdefabcdef')) -eq 'sk-***')
+Check 'журнал: подсказка другому с путём и «пришли этот файл»' ((Get-MmLogHint) -match [regex]::Escape($logPath) -and (Get-MmLogHint) -match 'пришли этот файл' -and (Get-MmLogHint) -match 'буфере обмена')
+Check 'журнал: каталог в root\logs' ((Get-MmLogsDir $logRoot) -eq (Join-Path $logRoot 'logs'))
+$logDir = Get-MmLogsDir $logRoot
+foreach ($i in 1..12) {
+	$f = Join-Path $logDir ('old_{0:D2}.log' -f $i)
+	Set-Content -LiteralPath $f -Value 'x'
+	(Get-Item $f).LastWriteTime = (Get-Date).AddMinutes(-$i)
+}
+$newLog = Start-MmLog -Script 'update' -Root $logRoot
+$left = @(Get-ChildItem -LiteralPath $logDir -File -Filter '*.log')
+Check 'журнал: ротация — не больше 10 файлов' ($left.Count -le 10 -and (Test-Path -LiteralPath $newLog)) ("осталось " + $left.Count)
+
+# --- версии из одного файла -------------------------------------------------------------------------------------------
+$manifest = Read-MmVersions $repo
+Check 'versions.json: читается с диска' ($manifest.Tag -match '^v\d+\.\d+\.\d+$' -and $manifest.Pi -match '^\d+\.\d+\.\d+$' -and $manifest.Node -match '^\d+\.\d+\.\d+$') ($manifest | Out-String)
+Check 'versions.json: тег совпадает с bootstrap-тегом install.ps1' ($manifest.Tag -eq $MmTag) ("$($manifest.Tag) vs $MmTag")
+Check 'pi: версия совпала — «уже»' ((Get-MmPiPlan -Have $manifest.Pi -Want $manifest.Pi) -eq 'уже')
+Check 'pi: версия отличается — «ставить»' ((Get-MmPiPlan -Have '1.4.9' -Want $manifest.Pi) -eq 'ставить')
+Check 'pi: не установлен — «ставить»' ((Get-MmPiPlan -Have '' -Want $manifest.Pi) -eq 'ставить')
+Check 'node: старше минимума — «ставить»' ((Get-MmNodePlan -Have '22.18.0' -Min $manifest.Node) -eq 'ставить')
+Check 'node: новее минимума — «уже»' ((Get-MmNodePlan -Have '24.1.0' -Min $manifest.Node) -eq 'уже' -and (Get-MmNodePlan -Have $manifest.Node -Min $manifest.Node) -eq 'уже')
+Check 'node: не установлен — «ставить»' ((Get-MmNodePlan -Have $null -Min $manifest.Node) -eq 'ставить')
+$piCmdLine = Get-PiInstallCmdLine -NpmPath 'C:\node\npm.cmd' -Prefix 'C:\root\npm' -Version $manifest.Pi
+Check 'команда pi: версия из versions.json, --ignore-scripts, свой prefix' ($piCmdLine -match ('@earendil-works/pi-coding-agent@' + [regex]::Escape($manifest.Pi)) -and $piCmdLine -match '--ignore-scripts' -and $piCmdLine -match 'C:\\root\\npm') $piCmdLine
+$badThrew = $false
+try { ConvertFrom-MmVersions '{"pi":"1.0.0"}' | Out-Null } catch { $badThrew = $true }
+Check 'versions.json: без tag — исключение, не тишина' $badThrew
+$envVersions = Join-Path $tmp 'versions.json'
+[IO.File]::WriteAllText($envVersions, '{"tag":"v9.9.9","pi":"2.0.0","node":"24.0.0"}')
+$script:MmVersions = $null
+$env:MM_VERSIONS_FILE = $envVersions
+$v2 = Get-BootVersions
+Check 'versions.json: bootstrap-чтение по MM_VERSIONS_FILE' ($v2.Tag -eq 'v9.9.9' -and $v2.Pi -eq '2.0.0')
+$instSrc = Get-Content -Raw (Join-Path $repo 'install.ps1')
+Check 'install.ps1: версия pi не зашита константой, берётся из versions.json' (-not ($instSrc -match 'MmPiVersion\s*=') -and $instSrc -match 'Ensure-MmPiRuntime')
+Remove-Item Env:\MM_VERSIONS_FILE -ErrorAction SilentlyContinue
+$script:MmVersions = $null
+
 # --- шаги: сообщение при ошибке --------------------------------------------------------------------------------------
 $env:MM_FAIL_STEP = '2'
 $msg = (& { $null = Invoke-Step 2 'Git' { 'не выполнится' } } *>&1 | Out-String)
-Check 'шаг: искусственная ошибка даёт «Шаг 2 (Git) не получился»' ($msg -match 'Шаг 2 \(Git\) не получился' -and $msg -match 'Сфотографируй')
+Check 'шаг: искусственная ошибка даёт «Шаг 2 (Git) не получился» и путь к журналу' ($msg -match 'Шаг 2 \(Git\) не получился' -and $msg -match 'Журнал:')
 Check 'шаг: ошибка записана в список' ($script:MmFailed -contains '2 (Git)')
 $env:MM_FAIL_STEP = ''
 $script:MmFailed = @()

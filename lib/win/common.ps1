@@ -36,6 +36,7 @@ function Get-MmPaths {
 		AgentDir  = $agent
 		Auth      = Join-Path $agent 'auth.json'
 		Settings  = Join-Path $agent 'settings.json'
+		Logs      = Join-Path $root 'logs'
 	}
 }
 
@@ -81,6 +82,100 @@ function Write-Utf8NoBom {
 	$dir = Split-Path -Parent $Path
 	if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 	[IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding $false))
+}
+
+# --- журнал ------------------------------------------------------------------------------------
+# Друг не может «сфотографировать окно»: модель картинок не видит. Поэтому каждый скрипт пишет журнал
+# в %LOCALAPPDATA%\music_mentor\logs\<скрипт>_<дата-время>.log — туда идёт всё, что видно в окне, плюс
+# тексты исключений и номера шагов. Ключ DeepSeek в журнал не попадает никогда: перед записью строка
+# проходит ConvertTo-MmLogSafe. Хранятся последние 10 журналов.
+
+function Get-MmLogsDir {
+	param([string]$Root)
+	if (-not $Root) { $Root = Get-MmRoot }
+	return (Join-Path $Root 'logs')
+}
+
+function Get-MmLogFileName {
+	# <скрипт>_<дата-время>.log. Секунды в имени: два запуска подряд не затирают друг друга.
+	param([string]$Script, [datetime]$Now)
+	if (-not $Now) { $Now = Get-Date }
+	return ('{0}_{1}.log' -f ($Script -replace '[^\w.\-]', '_'), $Now.ToString('yyyy-MM-dd_HHmmss'))
+}
+
+function ConvertTo-MmLogSafe {
+	# Маска для всего, что похоже на секрет. Пишется в журнал только результат.
+	param([string]$Text)
+	if (-not $Text) { return '' }
+	$t = [regex]::Replace($Text, 'sk-[A-Za-z0-9_\-]{8,}', 'sk-***')
+	$t = [regex]::Replace($t, '(?i)(authorization\s*[:=]\s*)?bearer\s+\S+', 'Bearer ***')
+	return $t
+}
+
+function Get-MmLogPath {
+	if (Get-Variable -Name MmLogPath -Scope Global -ErrorAction SilentlyContinue) { return $global:MmLogPath }
+	return $null
+}
+
+function Remove-OldMmLogs {
+	# Оставить последние $Keep журналов (по времени изменения). $Current не трогаем никогда.
+	param([string]$Dir, [int]$Keep = 10, [string]$Current)
+	if (-not $Dir -or -not (Test-Path -LiteralPath $Dir)) { return }
+	$files = @(Get-ChildItem -LiteralPath $Dir -File -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+	if ($files.Count -le $Keep) { return }
+	$drop = @($files[$Keep..($files.Count - 1)])
+	foreach ($f in $drop) {
+		if ($Current -and $f.FullName -eq $Current) { continue }
+		Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+	}
+}
+
+function Start-MmLog {
+	# Начать журнал. Возвращает путь к файлу; дальнейшая запись — через Write-MmLog / Write-MmHost.
+	param([string]$Script, [string]$Root)
+	$dir = Get-MmLogsDir $Root
+	New-Item -ItemType Directory -Path $dir -Force | Out-Null
+	$path = Join-Path $dir (Get-MmLogFileName -Script $Script)
+	$global:MmLogPath = $path
+	$enc = New-Object Text.UTF8Encoding $false
+	[IO.File]::AppendAllText($path, ((ConvertTo-MmLogSafe ('=== music_mentor: {0}, {1} ===' -f $Script, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))) + "`r`n"), $enc)
+	Remove-OldMmLogs -Dir $dir -Keep 10 -Current $path
+	return $path
+}
+
+function Write-MmLog {
+	# Строка только в журнал (текст исключения, подробности). Ошибка журнала не ломает работу.
+	param([string]$Text)
+	$path = Get-MmLogPath
+	if (-not $path) { return }
+	try {
+		[IO.File]::AppendAllText($path, ((ConvertTo-MmLogSafe "$Text") + "`r`n"), (New-Object Text.UTF8Encoding $false))
+	} catch { }
+}
+
+function Write-MmHost {
+	# В окно и в журнал одновременно (Write-Host в PowerShell 5.1 сам в журнал не попадает).
+	param([string]$Text, [string]$Color)
+	Write-MmLog $Text
+	if ($Color) { Write-Host $Text -ForegroundColor $Color } else { Write-Host $Text }
+}
+
+function Copy-MmLogToClipboard {
+	# Положить сам файл журнала в буфер обмена (Windows: Set-Clipboard -Path). Не вышло — $false.
+	param([string]$Path)
+	if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $false }
+	try { Set-Clipboard -Path $Path; return $true } catch { }
+	try { $null = [IO.File]::ReadAllText($Path) | Set-Clipboard; return $true } catch { }
+	return $false
+}
+
+function Get-MmLogHint {
+	# Текст для друга вместо «сфотографируй окно»: путь к журналу и он же в буфере обмена.
+	param([string]$Path)
+	if (-not $Path) { $Path = Get-MmLogPath }
+	if (-not $Path) { return 'Журнала нет: запиши, что написано в окне, и пришли автору.' }
+	if (Copy-MmLogToClipboard $Path) { return ("Журнал: {0}. Он уже в буфере обмена — пришли этот файл автору." -f $Path) }
+	return ("Журнал: {0}. Пришли этот файл автору." -f $Path)
 }
 
 # --- JSON (ключ и настройки pi) ------------------------------------------------------------------
@@ -168,6 +263,155 @@ function Test-DeepSeekKey {
 	} catch { }
 	if (-not $avail) { return @{ Ok = $true; Text = "ключ рабочий, но денег на балансе нет$bal" } }
 	return @{ Ok = $true; Text = "ключ принят$bal" }
+}
+
+# --- версии: versions.json, Node, pi -----------------------------------------------------------
+# Версии живут в одном файле — lib/win/versions.json: tag (тег релиза), pi (версия pi), node
+# (минимальная версия Node). install.ps1 читает его по сети с того же тега, update.ps1 — с диска
+# после checkout, tools/release.sh — пишет. Тег в install.ps1 (default $MmTag) — только bootstrap
+# fallback: равен tag из versions.json, это проверяет npm test.
+
+function ConvertFrom-MmVersions {
+	# Разбор versions.json в @{ Tag; Pi; Node }. Битый или неполный файл — исключение, не тишина.
+	param([string]$Json)
+	if (-not $Json -or -not $Json.Trim()) { throw 'versions.json пуст' }
+	$o = $null
+	try { $o = $Json | ConvertFrom-Json } catch { throw "versions.json не разобрался как JSON: $($_.Exception.Message)" }
+	$res = @{}
+	foreach ($k in @('tag', 'pi', 'node')) {
+		$v = $null
+		if ($o.PSObject.Properties[$k]) { $v = [string]$o.$k }
+		if (-not $v -or -not $v.Trim()) { throw "в versions.json нет поля $k" }
+		$res[$k] = $v.Trim()
+	}
+	if ($res.tag -notmatch '^v\d+\.\d+\.\d+') { throw "versions.json: tag '$($res.tag)' не похож на vX.Y.Z" }
+	if ($res.pi -notmatch '^\d+\.\d+\.\d+') { throw "versions.json: pi '$($res.pi)' не похож на X.Y.Z" }
+	if ($res.node -notmatch '^\d+\.\d+\.\d+') { throw "versions.json: node '$($res.node)' не похож на X.Y.Z" }
+	return @{ Tag = $res.tag; Pi = $res.pi; Node = $res.node }
+}
+
+function Read-MmVersions {
+	# versions.json из скачанного кода (после checkout обновления).
+	param([string]$AppDir)
+	$file = Join-Path (Join-Path $AppDir 'lib\win') 'versions.json'
+	if (-not (Test-Path -LiteralPath $file)) { throw "нет файла $file" }
+	return (ConvertFrom-MmVersions ([IO.File]::ReadAllText($file)))
+}
+
+function Get-WinArch {
+	$a = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+	if ($a -eq 'ARM64') { return 'arm64' }
+	return 'x64'
+}
+
+function Get-Web {
+	# Скачать текст (без OutFile) или файл. Одна на все запросы к сети.
+	param([string]$Url, [string]$OutFile)
+	$h = @{ 'User-Agent' = 'music_mentor-installer' }
+	if ($OutFile) { Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -Headers $h -TimeoutSec 600 } else { Invoke-RestMethod -Uri $Url -Headers $h -TimeoutSec 60 }
+}
+
+function Get-NodeVersionOnPath {
+	$n = Get-Command node -ErrorAction SilentlyContinue
+	if (-not $n) { return $null }
+	try { return [version](((& $n.Source --version) -replace '^v', '').Trim()) } catch { return $null }
+}
+
+function Get-MmNodePlan {
+	# Чистая функция: 'уже' или 'ставить'. Нет node или он старше минимального — ставим свой LTS.
+	param([string]$Have, [string]$Min)
+	if (-not $Have) { return 'ставить' }
+	try { if ([version]$Have -ge [version]$Min) { return 'уже' } } catch { }
+	return 'ставить'
+}
+
+function Get-MmPiPlan {
+	# Чистая функция: 'уже' (версия совпала) или 'ставить' (в т.ч. pi нет вовсе).
+	param([string]$Have, [string]$Want)
+	if ($Have -and $Have.Trim() -eq $Want.Trim()) { return 'уже' }
+	return 'ставить'
+}
+
+function Get-PiInstallCmdLine {
+	# Строка `npm install` pi — одна на установщик и на обновление (шаг 3 установщика).
+	param([string]$NpmPath, [string]$Prefix, [string]$Version)
+	return ('"{0}" install -g --ignore-scripts --no-fund --no-audit --no-update-notifier --loglevel=error --prefix "{1}" "@earendil-works/pi-coding-agent@{2}" 2>&1' -f $NpmPath, $Prefix, $Version)
+}
+
+function Install-StandaloneNode {
+	# Node LTS с nodejs.org в <Root>\node (без админа, с проверкой SHA256).
+	param([string]$Root, [string]$MinVersion)
+	$dest = Join-Path $Root 'node'
+	$arch = Get-WinArch
+	$idx = Get-Web 'https://nodejs.org/dist/index.json'
+	$min = [version]$MinVersion
+	$entry = @($idx | Where-Object { $_.lts -and $_.files -contains "win-$arch-zip" -and ([version]($_.version -replace '^v', '')) -ge $min }) | Select-Object -First 1
+	if (-not $entry) { throw "в списке Node.js нет LTS $MinVersion или новее для win-$arch" }
+	$name = "node-$($entry.version)-win-$arch.zip"
+	$base = "https://nodejs.org/dist/$($entry.version)"
+	$sums = Get-Web "$base/SHASUMS256.txt"
+	$line = @(($sums -split "`n") | Where-Object { $_ -match [regex]::Escape($name) + '\s*$' }) | Select-Object -First 1
+	if (-not $line) { throw "в SHASUMS256.txt нет $name" }
+	$want = ($line -split '\s+')[0].ToLowerInvariant()
+	$zip = Join-Path ([IO.Path]::GetTempPath()) $name
+	Write-MmHost "  качаю Node.js $($entry.version)"
+	Get-Web "$base/$name" $zip
+	$got = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+	if ($got -ne $want) { throw "контрольная сумма $name не совпала" }
+	Add-Type -AssemblyName System.IO.Compression.FileSystem
+	$tmpDir = Join-Path ([IO.Path]::GetTempPath()) ('mm_node_' + [guid]::NewGuid().ToString('N'))
+	[IO.Compression.ZipFile]::ExtractToDirectory($zip, $tmpDir)
+	if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+	New-Item -ItemType Directory -Path $Root -Force | Out-Null
+	Move-Item -LiteralPath (Join-Path $tmpDir ([IO.Path]::GetFileNameWithoutExtension($name))) -Destination $dest
+	Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+}
+
+function Ensure-MmPiRuntime {
+	# Привести Node и pi к версиям из versions.json. Идемпотентно: совпало — ничего не делает.
+	# Возвращает @{ Node; Pi; ChangedPi; ChangedNode }.
+	# Вызывают оба: install.ps1 (шаг 3) и update.ps1 (после checkout).
+	param([string]$Root, $Versions)
+	$changedNode = $false
+	$nv = Get-NodeVersionOnPath
+	if ((Get-MmNodePlan -Have $nv -Min $Versions.Node) -eq 'ставить') {
+		if ($nv) { Write-MmHost "  Node.js $nv старый (нужен $($Versions.Node)+), ставлю свой LTS" } else { Write-MmHost "  Node.js не найден, ставлю LTS $($Versions.Node)+" }
+		Install-StandaloneNode -Root $Root -MinVersion $Versions.Node
+		$changedNode = $true
+		$nv = Get-NodeVersionOnPath
+		if (-not $nv) { throw 'Node.js скачан, но node не запускается' }
+		Write-MmHost "  Node.js $nv поставлен в $Root\node"
+	} else {
+		Write-MmHost "  Node.js $nv уже есть"
+	}
+	$npmPrefix = Join-Path $Root 'npm'
+	$piCmd = Join-Path $npmPrefix 'pi.cmd'
+	$have = $null
+	if (Test-Path -LiteralPath $piCmd) { try { $have = (& $piCmd --version | Select-Object -First 1).ToString().Trim() } catch { $have = $null } }
+	$changedPi = $false
+	if ((Get-MmPiPlan -Have $have -Want $Versions.Pi) -eq 'уже') {
+		Write-MmHost "  pi $have уже есть"
+		return @{ Node = "$nv"; Pi = $have; ChangedPi = $false; ChangedNode = $changedNode }
+	}
+	Write-MmHost "  ставлю pi $($Versions.Pi) (npm, без скриптов)"
+	New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null
+	$npmPath = $env:MM_NPM
+	if (-not $npmPath) { $c = Get-Command npm.cmd -ErrorAction SilentlyContinue; if ($c) { $npmPath = $c.Source } }
+	if (-not $npmPath) { throw 'npm не найден рядом с node' }
+	$line = Get-PiInstallCmdLine -NpmPath $npmPath -Prefix $npmPrefix -Version $Versions.Pi
+	# Через cmd.exe: stderr npm (warn/notice) иначе показывается в PowerShell 5.1 красным «NativeCommandError».
+	$old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+	$cmdLine = "`"$line`""
+	try { $npmOut = & cmd.exe /d /s /c $cmdLine 2>&1 } finally { $ErrorActionPreference = $old }
+	foreach ($l in @($npmOut)) { Write-MmLog "$l" }
+	if ($LASTEXITCODE -ne 0) { throw "npm install закончился кодом $LASTEXITCODE" }
+	if (-not (Test-Path -LiteralPath $piCmd)) { throw "после установки нет $piCmd" }
+	$have = (& $piCmd --version | Select-Object -First 1).ToString().Trim()
+	if ($have -ne $Versions.Pi) { throw "pi сообщил версию '$have', ожидалась $($Versions.Pi)" }
+	$changedPi = $true
+	Write-MmHost "  pi $have"
+	return @{ Node = "$nv"; Pi = $have; ChangedPi = $changedPi; ChangedNode = $changedNode }
 }
 
 # --- Ableton Live и мост --------------------------------------------------------------------------
@@ -330,7 +574,7 @@ function Copy-BridgeTo {
 function Copy-BridgeElevated {
 	# Копия в папку программы: UAC. Сообщение пользователю идёт до запроса.
 	param([string]$Source, [string]$ScriptsDir)
-	Write-Host '  Нужно разрешение администратора: сейчас появится окно Windows («Разрешить ли этому приложению внести изменения»). Нажми «Да».' -ForegroundColor Yellow
+	Write-MmHost '  Нужно разрешение администратора: сейчас появится окно Windows («Разрешить ли этому приложению внести изменения»). Нажми «Да».' 'Yellow'
 	$tmp = Join-Path ([IO.Path]::GetTempPath()) ('mm_bridge_' + [guid]::NewGuid().ToString('N') + '.ps1')
 	$cmd = @"
 `$ErrorActionPreference = 'Stop'
@@ -371,7 +615,7 @@ function Install-Bridge {
 		$key = $t.Path.ToLowerInvariant()
 		if ($done.ContainsKey($key)) { $lines += "${label}: мост уже поставлен в $($t.Path)."; continue }
 		$done[$key] = $true
-		if ($t.Why) { Write-Host "  ${label}: $($t.Why)." }
+		if ($t.Why) { Write-MmHost "  ${label}: $($t.Why)." }
 		if ($t.NeedsAdmin) {
 			if ($NoElevate) { $lines += "${label}: нужен администратор (не запрашивал), мост не поставлен в $($t.Path)."; continue }
 			$state = 'уже'
@@ -379,7 +623,7 @@ function Install-Bridge {
 			if ((Test-Path -LiteralPath $destDir) -and ((Get-DirHash $BridgeSource) -eq (Get-DirHash $destDir))) {
 				$state = 'уже'
 			} else {
-				Write-Host "  ${label}: $($t.Why)."
+				Write-MmHost "  ${label}: $($t.Why)."
 				$state = Copy-BridgeElevated -Source $BridgeSource -ScriptsDir $t.Path
 			}
 		} else {
@@ -392,17 +636,75 @@ function Install-Bridge {
 
 # --- рабочая папка, ярлыки, обновление -------------------------------------------------------------
 
-function Copy-WorkspaceTemplate {
-	# Шаг 7: рабочая папка ученика. Уже есть — не трогаем. Возвращает 'уже' или 'создана'.
-	param([string]$Template, [string]$Workspace)
-	if (Test-Path -LiteralPath $Workspace) {
-		$any = Get-ChildItem -LiteralPath $Workspace -Force -ErrorAction SilentlyContinue | Select-Object -First 1
-		if ($any) { return 'уже' }
-	}
+function Get-MmLearnerDirs {
+	# Чьё что в шаблонной рабочей папке — одна таблица, здесь и только здесь.
+	#   файлы ученика — всё внутри этих папок (профиль, журнал, снимки, заметки, упражнения):
+	#                    создаются, только если их нет; существующие не перезаписываются НИКОГДА;
+	#   файлы наставника — всё остальное из template/ (AGENTS.md, будущие скиллы и knowledge):
+	#                    при обновлении заменяются новой версией (роль наставника меняется от версии к версии).
+	# Файлы рабочей папки, которых нет в шаблоне, не удаляются и не трогаются.
+	return @('learner', 'notes')
+}
+
+function Get-TemplateOwner {
+	# 'learner' или 'mentor' по относительному пути внутри шаблона.
+	param([string]$Rel)
+	$top = (($Rel -split '[\\/]')[0]).ToLowerInvariant()
+	if ((Get-MmLearnerDirs) -contains $top) { return 'learner' }
+	return 'mentor'
+}
+
+function Get-WorkspaceTemplatePlan {
+	# Чистая функция: что делать с каждым файлом шаблона в рабочей папке.
+	# Возвращает список @{ Rel; Owner; Action }, Action = 'write' (наставника) | 'create' | 'keep' (ученика).
+	param([string]$Template, [string]$Workspace, [scriptblock]$Exists)
+	if (-not $Exists) { $Exists = { param($p) Test-Path -LiteralPath $p } }
 	if (-not (Test-Path -LiteralPath $Template)) { throw "нет шаблона рабочей папки: $Template" }
+	$base = (Resolve-Path -LiteralPath $Template).Path.TrimEnd('\', '/')
+	$plan = @()
+	foreach ($f in @(Get-ChildItem -LiteralPath $Template -Recurse -File -Force | Sort-Object FullName)) {
+		$rel = $f.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+		if (-not $rel) { continue }
+		$owner = Get-TemplateOwner $rel
+		$action = 'write'
+		if ($owner -eq 'learner') { $action = if (& $Exists (Join-Rel $Workspace $rel)) { 'keep' } else { 'create' } }
+		$plan += @{ Rel = $rel; Owner = $owner; Action = $action }
+	}
+	return $plan
+}
+
+function Test-SameFileContent {
+	param([string]$A, [string]$B)
+	try { return ((Get-FileHash -LiteralPath $A -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $B -Algorithm SHA256).Hash) } catch { return $false }
+}
+
+function Copy-WorkspaceTemplate {
+	# Шаг 7 установщика и обновление. Файлы наставника перезаписываются (одинаковые не трогаем,
+	# чтобы повторный запуск был «актуальна»), файлы ученика только досоздаются (см. Get-MmLearnerDirs).
+	# Возвращает @{ Status; Mentor; Created; Kept }.
+	param([string]$Template, [string]$Workspace)
+	$fresh = -not (Test-Path -LiteralPath $Workspace)
+	$plan = @(Get-WorkspaceTemplatePlan -Template $Template -Workspace $Workspace)
+	$mentor = 0; $created = 0; $kept = 0
 	New-Item -ItemType Directory -Path $Workspace -Force | Out-Null
-	Copy-Item -Path (Join-Path $Template '*') -Destination $Workspace -Recurse -Force
-	return 'создана'
+	foreach ($e in $plan) {
+		$dest = Join-Rel $Workspace $e.Rel
+		$src = Join-Rel $Template $e.Rel
+		if ($e.Action -eq 'keep') { $kept++; continue }
+		if ((Test-Path -LiteralPath $dest) -and (Test-SameFileContent $src $dest)) { continue }
+		$dir = Split-Path -Parent $dest
+		if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+		Copy-Item -LiteralPath $src -Destination $dest -Force
+		if ($e.Action -eq 'create') { $created++ } else { $mentor++ }
+	}
+	$status = if ($fresh) { 'создана' } elseif ($mentor -gt 0 -or $created -gt 0) { 'обновлена' } else { 'актуальна' }
+	return @{ Status = $status; Mentor = $mentor; Created = $created; Kept = $kept }
+}
+
+function Format-WorkspaceTemplateResult {
+	# Одна строка для окна: что сделали с рабочей папкой.
+	param($Result, [string]$Workspace)
+	return ('{0}: {1} (файлов наставника: {2}, новых файлов ученика: {3}, правок ученика сохранено: {4})' -f $Workspace, $Result.Status, $Result.Mentor, $Result.Created, $Result.Kept)
 }
 
 function Write-Launcher {

@@ -1,4 +1,5 @@
-﻿# Ярлык «Обновить наставника» и тул mentor_update: git fetch --tags -> checkout последнего тега -> pi install -> мост.
+﻿# Ярлык «Обновить наставника» и тул mentor_update: git fetch --tags -> checkout последнего тега ->
+# Node и pi к версиям из versions.json -> pi install -> шаблон рабочей папки -> мост.
 # UTF-8 с BOM, PowerShell 5.1+. Без `exit`.
 param([switch]$NoPause)
 
@@ -7,31 +8,44 @@ $global:ProgressPreference = 'SilentlyContinue'
 $common = Join-Path $PSScriptRoot 'lib\win\common.ps1'
 . $common
 Set-Utf8Console
+$null = Start-MmLog 'update'
 
 function Invoke-MentorUpdate {
 	$p = Get-MmPaths
-	Write-Host ''
-	Write-Host 'Обновление наставника' -ForegroundColor Cyan
+	Write-MmHost ''
+	Write-MmHost 'Обновление наставника' 'Cyan'
 	$r = Update-MentorApp -AppDir $p.App
-	if ($r.Changed) { Write-Host "Версия: $($r.From) -> $($r.To)" } else { Write-Host "Версия $($r.To): $($r.Note)." }
-	# checkout мог заменить common.ps1 — перечитываем новую версию.
+	if ($r.Changed) { Write-MmHost "Версия: $($r.From) -> $($r.To)" } else { Write-MmHost "Версия $($r.To): $($r.Note)." }
+	# checkout мог заменить common.ps1 и versions.json — перечитываем новую версию.
 	. $common
+	$versions = Read-MmVersions $p.App
+	Write-MmHost ("Версии из versions.json: pi {0}, Node {1}+" -f $versions.Pi, $versions.Node)
+	$null = Ensure-MmPiRuntime -Root $p.Root -Versions $versions
+	Update-SessionPath
 	$piCmd = Join-Path $p.Npm 'pi.cmd'
 	if (-not (Test-Path -LiteralPath $piCmd)) { $c = Get-Command pi -ErrorAction SilentlyContinue; if ($c) { $piCmd = $c.Source } else { throw 'не нашёл pi' } }
-	Write-Host 'pi install'
+	Write-MmHost 'pi install'
 	$old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-	try { & $piCmd install $p.App 2>&1 | Out-Host } finally { $ErrorActionPreference = $old }
+	try { $piOut = & $piCmd install $p.App 2>&1 } finally { $ErrorActionPreference = $old }
+	foreach ($l in @($piOut)) { Write-MmHost "  $l" }
 	if ($LASTEXITCODE -ne 0) { throw "pi install закончился кодом $LASTEXITCODE" }
+	# Шаблон рабочей папки: файлы наставника (AGENTS.md, скиллы) заменяются, файлы ученика
+	# (learner/, notes/) только досоздаются — правки ученика не теряются.
+	$ws = Copy-WorkspaceTemplate -Template (Join-Path $p.App 'template') -Workspace $p.Workspace
+	Write-MmHost ('  ' + (Format-WorkspaceTemplateResult -Result $ws -Workspace $p.Workspace))
 	$lines = Install-Bridge -BridgeSource (Join-Path $p.App 'bridge\MentorBridge') -ProgramData $env:ProgramData -AppData $env:APPDATA -Documents $p.Documents
-	foreach ($l in $lines) { Write-Host $l }
-	if ($r.Changed) { Write-Host 'Готово. Перезапусти наставника, чтобы изменения заработали.' -ForegroundColor Green } else { Write-Host 'Готово.' -ForegroundColor Green }
+	foreach ($l in $lines) { Write-MmHost "  $l" }
+	if ($r.Changed) { Write-MmHost 'Готово. Перезапусти наставника, чтобы изменения заработали.' 'Green' } else { Write-MmHost 'Готово.' 'Green' }
+	Write-MmHost ("Журнал обновления: {0}" -f (Get-MmLogPath))
 }
 
 try {
 	Invoke-MentorUpdate
 } catch {
-	Write-Host ''
-	Write-Host "Обновление не получилось: $($_.Exception.Message)" -ForegroundColor Red
-	Write-Host 'Сфотографируй это окно и пришли автору.' -ForegroundColor Red
+	Write-MmHost ''
+	Write-MmHost "Обновление не получилось: $($_.Exception.Message)" 'Red'
+	Write-MmLog ("обновление: исключение: " + $_.Exception.ToString())
+	if ($_.ScriptStackTrace) { Write-MmLog ("обновление: стек: " + $_.ScriptStackTrace) }
+	Write-MmHost (Get-MmLogHint) 'Red'
 }
-if (-not $NoPause) { Write-Host ''; $null = Read-Host 'Нажми Enter, чтобы закрыть окно' }
+if (-not $NoPause) { Write-MmHost ''; $null = Read-Host 'Нажми Enter, чтобы закрыть окно' }

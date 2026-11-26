@@ -144,10 +144,12 @@ test("mentor_update: последний стабильный тег (число�
 	assert.equal(upd.latestStableTag([]), undefined);
 });
 
-test("mentor_update: зарегистрирован как тул", () => {
+test("mentor_update: зарегистрирован как тул и слушает старт сессии", () => {
 	const tools: any[] = [];
-	upd.default({ registerTool: (t: any) => tools.push(t) } as any);
+	const events: string[] = [];
+	upd.default({ registerTool: (t: any) => tools.push(t), on: (name: string) => events.push(name) } as any);
 	assert.deepEqual(tools.map((t) => t.name), ["mentor_update"]);
+	assert.ok(events.includes("session_start"), "нет тихих проверок на старте сессии");
 });
 
 test("в репо нет ключей и путей автора", () => {
