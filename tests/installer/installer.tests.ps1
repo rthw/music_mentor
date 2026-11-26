@@ -226,6 +226,20 @@ Check 'install.ps1: версия pi не зашита константой, бе
 Remove-Item Env:\MM_VERSIONS_FILE -ErrorAction SilentlyContinue
 $script:MmVersions = $null
 
+# --- скрипты: кто что зовёт (общая функция вместо двух копий) ---------------------------------------------------------
+$updSrc = Get-Content -Raw (Join-Path $repo 'update.ps1')
+Check 'update.ps1: версии читает из versions.json и догоняет pi/node' ($updSrc -match 'Read-MmVersions' -and $updSrc -match 'Ensure-MmPiRuntime') 
+Check 'update.ps1: рабочая папка обновляется после pi install' ($updSrc.IndexOf('pi install') -lt $updSrc.IndexOf('Copy-WorkspaceTemplate'))
+Check 'update.ps1: пишет журнал' ($updSrc -match "Start-MmLog 'update'")
+Check 'update.ps1: при ошибке путь к журналу, а не «сфотографируй»' ($updSrc -match 'Get-MmLogHint' -and -not ($updSrc -match 'Сфотографируй'))
+$ckSrc = Get-Content -Raw (Join-Path $repo 'change_key.ps1')
+Check 'change_key.ps1: пишет журнал и даёт путь к нему' ($ckSrc -match "Start-MmLog 'change_key'" -and $ckSrc -match 'Get-MmLogHint')
+$instSrc2 = Get-Content -Raw (Join-Path $repo 'install.ps1')
+Check 'install.ps1: журнал пишется с самого начала' ($instSrc2 -match "Start-MmLog 'install'")
+Check 'install.ps1: нигде не осталось «Сфотографируй»' (-not ($instSrc2 -match 'Сфотографируй'))
+$commonSrc = Get-Content -Raw (Join-Path $repo 'lib\win\common.ps1')
+Check 'установка pi: команда только в common.ps1, в скриптах второй копии нет' ($commonSrc -match '@earendil-works/pi-coding-agent@' -and -not ($instSrc2 -match '@earendil-works/pi-coding-agent@') -and -not ($updSrc -match '@earendil-works/pi-coding-agent@'))
+
 # --- шаги: сообщение при ошибке --------------------------------------------------------------------------------------
 $env:MM_FAIL_STEP = '2'
 $msg = (& { $null = Invoke-Step 2 'Git' { 'не выполнится' } } *>&1 | Out-String)

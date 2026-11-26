@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -106,6 +106,48 @@ test("PowerShell: проверка ключа по балансу и change_key 
 	}
 });
 
+test("PowerShell: ключ не попадает в журнал установки, а путь к журналу — попадает", { skip: skipPs, timeout: 120_000 }, async () => {
+	const srv = await fakeDeepseek();
+	try {
+		const tmp = mkdtempSync(path.join(tmpdir(), "mm_log_"));
+		const env = {
+			MM_DEEPSEEK_API: srv.url,
+			MM_NO_RUN: "1",
+			MM_ROOT: path.join(tmp, "root"),
+			MM_HOME: path.join(tmp, "home"),
+			PI_CODING_AGENT_DIR: path.join(tmp, "agent"),
+			MM_KEY: "good-key-12345",
+			MM_CLIP: "0",
+		};
+		const code = [
+			". ./lib/win/common.ps1",
+			". ./install.ps1",
+			"$log = Start-MmLog 'install'",
+			"Step-Key | Out-Null",
+			"\"LOG=|$log\"",
+			"\"HINT=|\" + (Get-MmLogHint $log)",
+			"\"TAIL=|\" + ((Get-Content -Raw $log) -replace \"`r?`n\", ' ~ ')",
+		].join("; ");
+		const r = await runPs(code, env);
+		assert.equal(r.status, 0, r.out);
+		const lines = r.out.trim().split("\n");
+		const logPath = (lines.find((l) => l.startsWith("LOG=|")) ?? "").slice("LOG=|".length).trim();
+		assert.match(logPath, /logs[\\/]install_\d{4}-\d{2}-\d{2}_\d{6}\.log$/, r.out);
+		assert.ok(existsSync(logPath), `журнала нет: ${logPath}`);
+		const body = readFileSync(logPath, "utf8");
+		assert.ok(!body.includes("good-key-12345"), "ключ попал в журнал");
+		assert.ok(!r.out.includes("good-key-12345"), "ключ попал в вывод");
+		assert.match(body, /ключ принят, баланс: 42\.50 CNY/, "в журнале нет того, что видел ученик");
+		const hint = (lines.find((l) => l.startsWith("HINT=|")) ?? "").slice("HINT=|".length);
+		assert.ok(hint.includes(logPath), `подсказка без пути: ${hint}`);
+		assert.match(hint, /пришли этот файл|буфере обмена/);
+		// ключ записан в auth.json pi
+		assert.equal(JSON.parse(readFileSync(path.join(tmp, "agent", "auth.json"), "utf8")).deepseek.key, "good-key-12345");
+	} finally {
+		srv.close();
+	}
+});
+
 test("tools/invite.sh: без секрета — подсказка, со значением — строка идёт только в wl-copy", () => {
 	const dir = mkdtempSync(path.join(tmpdir(), "mm_invite_"));
 	const clip = path.join(dir, "clip.txt");
@@ -124,6 +166,13 @@ test("tools/invite.sh: без секрета — подсказка, со зна
 	const line = readFileSync(clip, "utf8");
 	assert.match(line, /^\$env:MM_KEY='fakeval-9876543210'; irm https:\/\/raw\.githubusercontent\.com\/rthw\/music_mentor\/v\d+\.\d+\.\d+[^/]*\/install\.ps1 \| iex$/);
 	assert.match(ok.stdout, /скопирована в буфер/);
+	// Тег берётся из одного источника версии — lib/win/versions.json, а не из install.ps1.
+	const fileTag = JSON.parse(readFileSync(path.join(ROOT, "lib/win/versions.json"), "utf8")).tag;
+	assert.ok(line.includes(`music_mentor/${fileTag}/install.ps1`), `тег не из versions.json: ${line}`);
+	// Явный тег важнее файла.
+	const explicit = spawnSync("bash", ["tools/invite.sh", "v7.7.7"], { cwd: ROOT, env: { ...env, FAKE_HAS: "1", FAKE_VAL: val }, encoding: "utf8" });
+	assert.equal(explicit.status, 0, explicit.stderr);
+	assert.ok(readFileSync(clip, "utf8").includes("music_mentor/v7.7.7/install.ps1"));
 });
 
 try {
@@ -150,6 +199,81 @@ test("mentor_update: зарегистрирован как тул и слуша�
 	upd.default({ registerTool: (t: any) => tools.push(t), on: (name: string) => events.push(name) } as any);
 	assert.deepEqual(tools.map((t) => t.name), ["mentor_update"]);
 	assert.ok(events.includes("session_start"), "нет тихих проверок на старте сессии");
+});
+
+function copyRepo(): string {
+	const dir = mkdtempSync(path.join(tmpdir(), "mm_release_"));
+	for (const name of readdirSync(ROOT)) {
+		if (name === ".git" || name === "node_modules") continue;
+		cpSync(path.join(ROOT, name), path.join(dir, name), { recursive: true });
+	}
+	git(dir, ["init", "-q", "-b", "main"]);
+	git(dir, ["add", "-A"]);
+	git(dir, ["commit", "-qm", "init"]);
+	return dir;
+}
+
+function git(dir: string, args: string[]) {
+	const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=test", ...args], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+	if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr || r.stdout}`);
+	return r.stdout;
+}
+
+test("tools/release.sh: без --yes печатает план и ничего не меняет", () => {
+	const dir = copyRepo();
+	const files = ["lib/win/versions.json", "install.ps1", "package.json"];
+	const before = files.map((f) => readFileSync(path.join(dir, f), "utf8"));
+	const r = spawnSync("bash", ["tools/release.sh", "9.9.9"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+	assert.equal(r.status, 0, r.stderr);
+	assert.match(r.stdout, /План выпуска/);
+	assert.match(r.stdout, /v9\.9\.9/);
+	assert.match(r.stdout, /npm test/);
+	assert.match(r.stdout, /--yes/);
+	assert.match(r.stdout, /tools\/invite\.sh v9\.9\.9/, "план без команды для друга");
+	assert.match(r.stdout, /чистой Windows/);
+	files.forEach((f, i) => assert.equal(readFileSync(path.join(dir, f), "utf8"), before[i], `dry-run изменил ${f}`));
+	assert.equal(readFileSync(path.join(dir, "install.ps1"), "utf8").match(/v\d+\.\d+\.\d+/)?.[0], JSON.parse(before[0]).tag, "bootstrap-тег и versions.json разошлись");
+	assert.equal(git(dir, ["tag", "--list"]).trim(), "", "dry-run поставил тег");
+});
+
+test("tools/release.sh: --yes правит версии в трёх местах, коммитит, тегирует и пушит", { timeout: 120_000 }, () => {
+	const origin = mkdtempSync(path.join(tmpdir(), "mm_origin_"));
+	git(origin, ["init", "-q", "--bare", "-b", "main"]);
+	const dir = copyRepo();
+	git(dir, ["remote", "add", "origin", origin]);
+	git(dir, ["push", "-q", "origin", "main"]);
+	const r = spawnSync("bash", ["tools/release.sh", "0.2.0", "--yes"], { cwd: dir, encoding: "utf8", timeout: 120_000, env: { ...process.env, MM_RELEASE_TEST_CMD: "true" } });
+	assert.equal(r.status, 0, r.stderr + r.stdout);
+	assert.equal(JSON.parse(readFileSync(path.join(dir, "lib/win/versions.json"), "utf8")).tag, "v0.2.0");
+	assert.equal(JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")).version, "0.2.0");
+	assert.match(readFileSync(path.join(dir, "install.ps1"), "utf8").split("\n")[5], /else \{ 'v0\.2\.0' \}/, "bootstrap-тег в install.ps1");
+	assert.equal(git(dir, ["log", "-1", "--format=%s"]).trim(), "release v0.2.0");
+	assert.ok(git(dir, ["tag", "--list"]).includes("v0.2.0"));
+	assert.ok(git(origin, ["tag", "--list"]).includes("v0.2.0"), "тег не ушёл на сервер");
+	assert.match(r.stdout, /Выпустил v0\.2\.0/);
+	assert.match(r.stdout, /tools\/invite\.sh v0\.2\.0/);
+	// install.ps1 по-прежнему без BOM (его читает irm | iex)
+	assert.notEqual(readFileSync(path.join(dir, "install.ps1"))[0], 0xef);
+});
+
+test("tools/release.sh: грязное дерево, чужая ветка и кривая версия — отказ", () => {
+	const dir = copyRepo();
+	writeFileSync(path.join(dir, "черновик.txt"), "x");
+	const dirty = spawnSync("bash", ["tools/release.sh", "0.2.0", "--yes"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+	assert.notEqual(dirty.status, 0);
+	assert.match(dirty.stderr, /дерево не чистое/);
+	git(dir, ["checkout", "-q", "-b", "ветка"]);
+	const branch = spawnSync("bash", ["tools/release.sh", "0.2.0", "--yes"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+	assert.notEqual(branch.status, 0);
+	assert.match(branch.stderr, /только с ветки/);
+	git(dir, ["checkout", "-q", "main"]);
+	git(dir, ["add", "-A"]);
+	git(dir, ["commit", "-qm", "черновик"]);
+	for (const bad of ["1.2", "v1.2.3.4", "мусор"]) {
+		const r = spawnSync("bash", ["tools/release.sh", bad], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+		assert.notEqual(r.status, 0, `принял версию ${bad}`);
+		assert.match(r.stderr, /версия должна быть X\.Y\.Z/);
+	}
 });
 
 test("в репо нет ключей и путей автора", () => {
