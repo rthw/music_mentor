@@ -498,7 +498,8 @@ function Get-LiveInstalls {
 function Resolve-BridgeTarget {
 	# Чистая функция: куда ставить MentorBridge для одной установки Live.
 	#   Live 10 старше 10.1.13 (или версия неизвестна) -> <Live>\Resources\MIDI Remote Scripts, нужен UAC;
-	#   иначе -> <User Library>\Remote Scripts: путь из Library.cfg, если он локальный и существует,
+	#   иначе -> <User Library>\Remote Scripts: путь из Library.cfg, если он локальный и существует;
+	#            путь в cfg есть, но сетевой/недоступен -> Resources (UAC), если Live в ProgramData;
 	#            иначе Documents\Ableton\User Library.
 	param($Install, [string]$LibraryPath, [string]$Documents, [scriptblock]$Exists, [scriptblock]$IsFixed)
 	if (-not $Exists) { $Exists = { param($p) Test-Path -LiteralPath $p } }
@@ -527,6 +528,16 @@ function Resolve-BridgeTarget {
 	$note = ''
 	if ($LibraryPath -and (Test-LocalDrivePath $LibraryPath $IsFixed) -and (& $Exists $LibraryPath)) {
 		$ul = $LibraryPath
+	} elseif ($LibraryPath -and $Install.ProgramDataDir) {
+		# Live берёт Remote Scripts из своей User Library (из Library.cfg), а не из Documents: проверено на VM
+		# с User Library на UNC-шаре (12.4.16, 26.11) — копия в Documents не видна. Папку программы Live читает всегда.
+		return @{
+			Supported  = $true
+			Kind       = 'Resources'
+			Path       = (Join-Rel $Install.ProgramDataDir 'Resources\MIDI Remote Scripts')
+			NeedsAdmin = $true
+			Why        = "User Library из настроек Live ($LibraryPath) сетевой или недоступен, ставлю в папку программы Live (нужно разрешение администратора)"
+		}
 	} else {
 		if ($LibraryPath) { $note = "User Library из настроек Live ($LibraryPath) сетевой или недоступен, беру папку по умолчанию" }
 		$ul = Join-Rel $Documents 'Ableton\User Library'

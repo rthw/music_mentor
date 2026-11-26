@@ -39,9 +39,11 @@ $pd12 = 'C:\ProgramData\Ableton\Live 12 Suite'
 $t = Resolve-BridgeTarget -Install (Inst 12 ([version]'12.0.1') $pd12) -LibraryPath 'D:\UL' -Documents 'C:\Users\a\Documents' -Exists $exists
 Check 'мост: Live 12, локальный User Library из cfg' ($t.Kind -eq 'UserLibrary' -and (Norm $t.Path) -eq 'D:/UL/Remote Scripts' -and -not $t.NeedsAdmin) $t.Path
 $t = Resolve-BridgeTarget -Install (Inst 12 ([version]'12.0.1') $pd12) -LibraryPath '\\host.lan\Data\ableton' -Documents 'C:\Users\a\Documents' -Exists $exists
-Check 'мост: Live 12, UNC -> Documents' ((Norm $t.Path) -eq 'C:\Users\a\Documents/Ableton/User Library/Remote Scripts'.Replace('\', '/') -and $t.Why -match 'сетевой') $t.Path
+Check 'мост: Live 12, UNC -> Resources + UAC' ($t.Kind -eq 'Resources' -and $t.NeedsAdmin -and (Norm $t.Path) -like '*Live 12 Suite/Resources/MIDI Remote Scripts' -and $t.Why -match 'сетевой') $t.Path
+$t = Resolve-BridgeTarget -Install (Inst 12 ([version]'12.0.1') $null) -LibraryPath '\\host.lan\Data\ableton' -Documents 'C:\Users\a\Documents' -Exists $exists
+Check 'мост: Live 12 не в ProgramData, UNC -> Documents' ((Norm $t.Path) -like '*Documents/Ableton/User Library/Remote Scripts' -and $t.Why -match 'сетевой') $t.Path
 $t = Resolve-BridgeTarget -Install (Inst 11 ([version]'11.3.2') $null) -LibraryPath 'D:\UL' -Documents 'C:\Users\a\Documents' -Exists $missing
-Check 'мост: Live 11, путь из cfg не существует -> Documents' ((Norm $t.Path) -like '*Documents/Ableton/User Library/Remote Scripts') $t.Path
+Check 'мост: Live 11 не в ProgramData, путь из cfg не существует -> Documents' ((Norm $t.Path) -like '*Documents/Ableton/User Library/Remote Scripts') $t.Path
 $t = Resolve-BridgeTarget -Install (Inst 11 ([version]'11.3.2') $null) -LibraryPath $null -Documents 'C:\Users\a\Documents' -Exists $exists
 Check 'мост: нет Library.cfg -> Documents' ((Norm $t.Path) -like '*Documents/Ableton/User Library/Remote Scripts' -and -not $t.Why) $t.Path
 $t = Resolve-BridgeTarget -Install (Inst 10 ([version]'10.1.13') $null) -LibraryPath $null -Documents 'C:\Users\a\Documents' -Exists $exists
