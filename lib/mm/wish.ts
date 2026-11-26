@@ -131,9 +131,9 @@ export class ConsentGate {
 		const s = this.get();
 		const d = s.draft;
 		if (!d) return { ok: false, reason: "нет черновика: сначала action=draft и покажи текст ученику" };
-		if (this.now() - d.at > DRAFT_TTL_MS) return { ok: false, reason: "черновик устарел: покажи заявку ещё раз и жди «да»" };
+		if (this.now() - d.at > DRAFT_TTL_MS) return { ok: false, reason: "черновик устарел: вызови wish_send(action=draft) заново, покажи текст ученику и жди его «да»" };
 		if (s.seq <= d.seq) return { ok: false, reason: "ученик ещё не ответил на черновик: покажи ему текст и жди «да»" };
-		if (s.seq > d.seq + 1) return { ok: false, reason: "после черновика ученик писал о другом: покажи заявку ещё раз и жди «да»" };
+		if (s.seq > d.seq + 1) return { ok: false, reason: "после черновика ученик писал о другом, его «да» к этому тексту уже не относится: вызови wish_send(action=draft) заново с тем же текстом, покажи ученику и жди его следующее «да»" };
 		if (!isYes(s.last)) return { ok: false, reason: `ученик не согласился (его ответ: «${s.last.slice(0, 60)}»): исправь заявку или отмени` };
 		return { ok: true, text: d.text };
 	}
