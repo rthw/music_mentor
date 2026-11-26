@@ -98,7 +98,9 @@ test("сводка: пустой профиль — знакомство, без
 	assert.match(b.text, /## Профиль/);
 	assert.match(b.text, /вы ещё не знакомы/);
 	assert.match(b.text, /Познакомься по скиллу `mentor`/);
-	assert.match(b.text, /пяти вопросов по одному/);
+	assert.match(b.text, /по одному вопросу с вариантами/);
+	assert.match(b.text, /на чём играет/);
+	assert.match(b.text, /Имя не спрашивай/);
 	assert.match(b.text, /Проектов `\.als` не нашлось/);
 	assert.match(b.text, /Журнала сессий ещё нет/);
 	assert.match(b.text, /Сначала знакомство/);

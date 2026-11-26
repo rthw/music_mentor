@@ -26,6 +26,8 @@ export interface Profile {
 	interests: string[];
 	goals: string[];
 	likes: string[];
+	instrument: string;
+	wants_to_learn: string[];
 	live: string;
 	level: string;
 	summary: string;
@@ -86,7 +88,7 @@ function parseNodes(text: string): ProfileNode[] {
 
 /** Профиль ученика из markdown: простой фронтматтер + `## Кратко` + таблица статусов. */
 export function parseProfile(text: string): Profile {
-	const p: Profile = { name: "", interests: [], goals: [], likes: [], live: "", level: "", summary: "", nodes: [] };
+	const p: Profile = { name: "", interests: [], goals: [], likes: [], instrument: "", wants_to_learn: [], live: "", level: "", summary: "", nodes: [] };
 	let body = text;
 	const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
 	if (fm) {
@@ -96,8 +98,8 @@ export function parseProfile(text: string): Profile {
 			if (!m) continue;
 			const key = m[1].toLowerCase();
 			const raw = m[2];
-			if (key === "name" || key === "live" || key === "level") p[key] = unquote(raw);
-			else if (key === "interests" || key === "goals" || key === "likes") p[key] = listValue(raw);
+			if (key === "name" || key === "live" || key === "level" || key === "instrument") p[key] = unquote(raw);
+			else if (key === "interests" || key === "goals" || key === "likes" || key === "wants_to_learn") p[key] = listValue(raw);
 		}
 	}
 	const summary = section(body, "Кратко");
@@ -114,7 +116,7 @@ export function parseProfile(text: string): Profile {
 /** Профиль, в котором ещё ничего нет: первая сессия. */
 export function isEmptyProfile(p: Profile | undefined): boolean {
 	if (!p) return true;
-	return !p.name && !p.interests.length && !p.goals.length && !p.likes.length && !p.summary && !p.nodes.length;
+	return !p.name && !p.instrument && !p.wants_to_learn.length && !p.interests.length && !p.goals.length && !p.likes.length && !p.summary && !p.nodes.length;
 }
 
 function fmtDate(ms: number): string {
@@ -166,6 +168,8 @@ function profileText(p: Profile): string {
 	if (p.interests.length) lines.push(`Слушает и любит: ${p.interests.join(", ")}.`);
 	if (p.likes.length) lines.push(`Нравится в музыке: ${p.likes.join(", ")}.`);
 	if (p.goals.length) lines.push(`Цели: ${p.goals.join(", ")}.`);
+	if (p.wants_to_learn.length) lines.push(`Хочет научиться: ${p.wants_to_learn.join(", ")}.`);
+	if (p.instrument) lines.push(`Инструмент: ${p.instrument}.`);
 	if (p.summary) lines.push(`Кратко: ${p.summary}`);
 	const nodes = p.nodes.slice(0, MAX_NODES).map((n) => `${n.topic} — ${n.status}${n.evidence && n.evidence !== "—" ? ` (${n.evidence})` : ""}`);
 	if (nodes.length) lines.push(`Темы: ${nodes.join("; ")}.`);
@@ -179,7 +183,7 @@ export function briefingText(d: BriefingData): string {
 	out.push("", "## Профиль");
 	if (first) {
 		out.push(
-			"Пусто — вы ещё не знакомы. Познакомься по скиллу `mentor`: не больше пяти вопросов по одному (имя, что слушает, чего хочет, сколько времени на сессию). Версию и редакцию Live узнай сам — по проекту или мосту, не спрашивай. Потом сам посмотри 2–3 свежих проекта и запиши `learner/profile.md`.",
+			"Пусто — вы ещё не знакомы. Познакомься по скиллу `mentor`: сначала сам посмотри 2–3 свежих проекта и начни с одного живого наблюдения, потом по одному вопросу с вариантами — что хочет сделать, на чём играет (MIDI-клавиатура?), чему хочет научиться. Имя не спрашивай. Версию Live узнай сам. В конце — маршрут из 1–2 целей и первого шага, запиши `learner/profile.md`.",
 		);
 	} else {
 		out.push(profileText(d.profile!));
