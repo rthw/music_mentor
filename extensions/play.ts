@@ -83,8 +83,9 @@ async function liveTempo(): Promise<number | undefined> {
 	}
 }
 
-/** Ноты клипа из Live: конкретный слот или последний записанный/выделенный на треке. */
-async function liveSource(trackRef: unknown, slot: number | undefined, role: string): Promise<Source> {
+/** Ноты клипа из Live: конкретный слот или последний записанный/выделенный на треке.
+ * Экспортируется для ear.ts: диктант проверяется по тому же last_clip (T1911). */
+export async function liveSource(trackRef: unknown, slot: number | undefined, role: string): Promise<Source> {
 	const addr = bridgeAddress();
 	if (slot !== undefined) {
 		const r = await call({ cmd: "clip_notes", track: trackRef, slot }, addr);
