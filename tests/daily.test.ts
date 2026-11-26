@@ -83,6 +83,16 @@ test("обновление на старте: своя версия и ошиб�
 		undefined,
 	);
 	assert.equal(await upd.updateReminder({ root: root(), latest: async () => ({ latest: undefined }) }), undefined);
+	// Сеть упала — отметку всё равно ставим: без интернета не переспрашиваем на каждом старте.
+	const dir = root();
+	let asked = 0;
+	const broken = async () => {
+		asked++;
+		throw new Error("нет сети");
+	};
+	assert.equal(await upd.updateReminder({ root: dir, latest: broken }), undefined);
+	assert.equal(await upd.updateReminder({ root: dir, latest: broken }), undefined);
+	assert.equal(asked, 1);
 });
 
 test("баланс на старте: низкий баланс — предупреждение, нет ключа или сети — тишина", async () => {
