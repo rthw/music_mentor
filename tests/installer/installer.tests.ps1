@@ -152,6 +152,7 @@ Check 'ярлыки: без wt — лаунчер напрямую' ((@(Get-Shor
 Check 'ярлыки: change_key и update через -File' ($sp[1].Arguments -like '*change_key.ps1"' -and $sp[2].Arguments -like '*update.ps1"')
 Write-Launcher (Join-Path $tmp 'l.cmd')
 Check 'лаунчер: ASCII, зовёт pi.cmd' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'pi\.cmd' -and -not ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match '[^\x00-\x7F]'))
+Check 'лаунчер: баннер обновления pi выключен (PI_SKIP_VERSION_CHECK)' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'set "PI_SKIP_VERSION_CHECK=1"')
 
 # --- обновление по тегам --------------------------------------------------------------------------------------------
 $git = Get-Command git -ErrorAction SilentlyContinue

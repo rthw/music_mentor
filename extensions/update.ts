@@ -3,8 +3,9 @@
  * переустановка моста. Вся работа в update.ps1 (тот же скрипт, что и у ярлыка «Обновить наставника»).
  * check_only=true только сравнивает текущий и последний теги и ничего не меняет.
  *
- * Тут же две тихие проверки на старте сессии — не чаще раза в сутки (см. lib/mm/session.ts):
- * вышла ли новая версия и не кончается ли баланс ключа DeepSeek.
+ * Тут же две тихие проверки — не чаще раза в сутки (см. lib/mm/session.ts): вышла ли новая версия
+ * и не кончается ли баланс ключа DeepSeek. Вызывает их старт сессии (extensions/session_start.ts),
+ * чтобы предупреждения попали в сводку первого хода, а не только в окно.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -136,21 +137,6 @@ export async function remoteLatest(dir = APP_DIR): Promise<{ current?: string; l
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_start", (_event, ctx) => {
-		// Фоном и без ожидания: старт сессии не должен ждать сеть.
-		void (async () => {
-			const lines = await Promise.all([updateReminder(), balanceReminder()]);
-			for (const line of lines) {
-				if (!line) continue;
-				try {
-					ctx.ui.notify(line, "warning");
-				} catch {
-					// нет UI — не наша беда
-				}
-			}
-		})();
-	});
-
 	pi.registerTool({
 		name: "mentor_update",
 		label: "Обновить наставника",

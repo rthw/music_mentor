@@ -193,12 +193,20 @@ test("mentor_update: последний стабильный тег (число�
 	assert.equal(upd.latestStableTag([]), undefined);
 });
 
-test("mentor_update: зарегистрирован как тул и слушает старт сессии", () => {
+test("mentor_update: зарегистрирован как тул", () => {
 	const tools: any[] = [];
-	const events: string[] = [];
-	upd.default({ registerTool: (t: any) => tools.push(t), on: (name: string) => events.push(name) } as any);
+	upd.default({ registerTool: (t: any) => tools.push(t), on: () => {} } as any);
 	assert.deepEqual(tools.map((t) => t.name), ["mentor_update"]);
-	assert.ok(events.includes("session_start"), "нет тихих проверок на старте сессии");
+});
+
+test("старт сессии: session_start.ts собирает сводку, update.ts больше не шлёт уведомления сам", async () => {
+	const events: string[] = [];
+	upd.default({ registerTool: () => {}, on: (name: string) => events.push(name) } as any);
+	assert.ok(!events.includes("session_start"), "проверки на старте теперь в session_start.ts, иначе отметка «раз в сутки» съест предупреждения");
+	const start = await import("../extensions/session_start.ts");
+	const mine: string[] = [];
+	start.default({ on: (name: string) => mine.push(name) } as any, { build: async () => ({ text: "", firstSession: true, warnings: [], projects: [] }) });
+	assert.ok(mine.includes("session_start") && mine.includes("before_agent_start"));
 });
 
 function copyRepo(): string {

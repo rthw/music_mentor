@@ -725,7 +725,7 @@ function Write-Launcher {
 	$root = $p.Root
 	$def = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'music_mentor' } else { '' }
 	$envRoot = if ($root -ieq $def) { '%LOCALAPPDATA%\music_mentor' } else { $root }
-	$text = "@echo off`r`nset `"PATH=$envRoot\node;$envRoot\npm;%PATH%`"`r`n`"$envRoot\npm\pi.cmd`" %*`r`n"
+	$text = "@echo off`r`nset `"PATH=$envRoot\node;$envRoot\npm;%PATH%`"`r`nrem pi version is pinned by the installer: no self-update banner`r`nset `"PI_SKIP_VERSION_CHECK=1`"`r`n`"$envRoot\npm\pi.cmd`" %*`r`n"
 	[IO.File]::WriteAllText($Path, $text, (New-Object Text.ASCIIEncoding))
 }
 
