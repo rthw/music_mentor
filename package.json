@@ -1,6 +1,6 @@
 {
   "name": "music-mentor",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Наставник по музыке и Ableton Live для pi: читает проекты, считает теорию по нотам",
   "type": "module",
   "license": "MIT",

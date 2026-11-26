@@ -3,7 +3,7 @@
 # Файл в UTF-8 БЕЗ BOM (BOM ломает `irm | iex`), PowerShell 5.1+. Каждый шаг идемпотентен и обёрнут в try/catch;
 # ни одного молчаливого выхода и ни одного `exit` (под `irm | iex` он закрыл бы окно PowerShell).
 
-$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.4' }
+$MmTag = if ($env:MM_TAG) { $env:MM_TAG } else { 'v0.1.5' }
 $MmRepo = if ($env:MM_REPO) { $env:MM_REPO } else { 'https://github.com/rthw/music_mentor.git' }
 # Версии pi и Node — не здесь, а в lib/win/versions.json (один источник для установки, обновления
 # и выпуска). Тег в строке выше — только bootstrap: он равен tag из versions.json, это проверяет npm test.
