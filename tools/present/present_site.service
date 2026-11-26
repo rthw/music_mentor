@@ -1,0 +1,11 @@
+[Unit]
+Description=music_mentor: открытка present.whimsical.work (статика на 127.0.0.1:8792)
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/present/www
+# Без --browse: листинга нет, неизвестные пути — 404.
+ExecStart=%h/.local/share/mise/shims/caddy file-server --listen 127.0.0.1:8792 --root %h/.local/share/present/www
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
