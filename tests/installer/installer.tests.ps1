@@ -210,7 +210,7 @@ Check 'ярлыки: change_key и update через -File' ($sp[1].Arguments -l
 Write-Launcher (Join-Path $tmp 'l.cmd')
 Check 'лаунчер: ASCII, зовёт pi.cmd' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'pi\.cmd' -and -not ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match '[^\x00-\x7F]'))
 $launcher = Get-Content -Raw (Join-Path $tmp 'l.cmd')
-Check 'лаунчер: аварийный выключатель — guard.ts, код 10 -> повтор, строка без кириллицы' ($launcher -match 'guard\.ts' -and $launcher -match 'if errorlevel 10 goto retry' -and $launcher -match 'MM_PI=' -and $launcher -match 'chcp 65001' -and $launcher -match ':plain' -and ([regex]::Matches($launcher, '(?m)^call "%MM_PI%" %\*$')).Count -eq 3 -and $launcher -notmatch '(?m)^"%MM_PI%"')
+Check 'лаунчер: аварийный выключатель — guard.ts, код 10 -> повтор, строка без кириллицы' ($launcher -match 'guard\.ts' -and $launcher -match 'if errorlevel 10 goto retry' -and $launcher -match 'MM_PI=' -and $launcher -match 'chcp 65001' -and $launcher -match ':plain' -and ([regex]::Matches($launcher, '(?m)^call "%MM_PI%" %\*\r?$')).Count -eq 3 -and $launcher -notmatch '(?m)^"%MM_PI%"')
 Check 'лаунчер: без guard.ts (старое приложение) запускает pi как раньше' ($launcher -match 'if not exist "%MM_GUARD%" goto plain')
 Check 'лаунчер: баннер обновления pi выключен (PI_SKIP_VERSION_CHECK)' ((Get-Content -Raw (Join-Path $tmp 'l.cmd')) -match 'set "PI_SKIP_VERSION_CHECK=1"')
 
