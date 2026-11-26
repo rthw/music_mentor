@@ -2,7 +2,7 @@
 // Собирает страницу-открытку present.whimsical.work.
 // Установочный .cmd (с ключом DeepSeek друга) шифруется паролем: PBKDF2-SHA256 + AES-GCM, в браузере
 // расшифровывается WebCrypto. Ключ в открытом виде в страницу не попадает. Готовая страница — вне репо.
-//   secret run deepseek_music_mentor present_password -- node tools/present/build.mjs <тег> <папка-выхода>
+//   secret run deepseek_music_mentor,present_password -- node tools/present/build.mjs <тег> <папка-выхода>
 // Пароль — только из хранилища `secret` (present_password): репо публичный, в коде его быть не должно.
 import { webcrypto as crypto } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

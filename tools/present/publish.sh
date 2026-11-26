@@ -9,6 +9,6 @@ for s in deepseek_music_mentor present_password; do
 	secret list 2>/dev/null | grep -qx "$s" || { echo "publish: нет секрета $s — secret set $s" >&2; exit 1; }
 done
 out="$HOME/.local/share/present/www"
-secret run deepseek_music_mentor present_password -- node "$ROOT/tools/present/build.mjs" "$tag" "$out"
+secret run deepseek_music_mentor,present_password -- node "$ROOT/tools/present/build.mjs" "$tag" "$out"
 code=$(curl -s -o /dev/null -w "%{http_code}" https://present.whimsical.work/ || true)
 echo "publish: https://present.whimsical.work/ -> HTTP $code"
