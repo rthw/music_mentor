@@ -5,7 +5,7 @@
 //   secret run deepseek_music_mentor,present_password -- node tools/present/build.mjs <тег> <папка-выхода>
 // Пароль — только из хранилища `secret` (present_password): репо публичный, в коде его быть не должно.
 import { webcrypto as crypto } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const [tag, outDir] = process.argv.slice(2);
@@ -56,4 +56,5 @@ const html = readFileSync(path.join(here, "index.html"), "utf8").replace(
 if (html.includes(key) || passwords.some((p) => html.includes(p))) throw new Error("ключ или пароль в открытом виде попал в страницу");
 mkdirSync(outDir, { recursive: true });
 writeFileSync(path.join(outDir, "index.html"), html);
+cpSync(path.join(here, "img"), path.join(outDir, "img"), { recursive: true });
 console.log(`build: ${path.join(outDir, "index.html")} (тег ${tag}, паролей ${boxes.length})`);
