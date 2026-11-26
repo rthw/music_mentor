@@ -13,8 +13,16 @@
  *
  * Задание — ноты клипа, правильный ответ, варианты: `lib/mm/ear.ts` (чистые функции, tests/ear.test.ts).
  * Здесь только «где взять материал», мост и состояние сессии.
+ *
+ * Состояние — файл в системном временном каталоге (имя — хеш рабочей папки), а не в самой папке
+ * ученика: ответ должен пережить перезапуск pi (продолжение сессии другим процессом), но не лежать
+ * там, куда модель полезет за материалом.
  */
 
+import { createHash } from "node:crypto";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
@@ -49,6 +57,46 @@ interface Current {
 	/** Номер строки в rows — чтобы засчитать ответ именно этому заданию. */
 	row: number;
 	answered?: { given: string; right: boolean };
+}
+
+interface Session {
+	current?: Current;
+	rows: Row[];
+	/** Копия проекта за сессию уже сделана. */
+	backedUp?: boolean;
+}
+
+/** Где живёт состояние сессии: временный каталог, имя — от рабочей папки. */
+export function statePath(cwd: string): string {
+	const hash = createHash("sha1").update(cwd).digest("hex").slice(0, 12);
+	return join(tmpdir(), `music_mentor_ear_${hash}.json`);
+}
+
+/** Прочитать состояние; битый или чужой файл — пустая сессия (лучше новая, чем падение). */
+export function loadSession(cwd: string): Session {
+	try {
+		const raw = JSON.parse(readFileSync(statePath(cwd), "utf8"));
+		if (!raw || typeof raw !== "object" || !Array.isArray(raw.rows)) return { rows: [] };
+		return { current: raw.current, rows: raw.rows, backedUp: raw.backedUp === true };
+	} catch {
+		return { rows: [] };
+	}
+}
+
+export function saveSession(cwd: string, s: Session): void {
+	try {
+		writeFileSync(statePath(cwd), JSON.stringify({ ...s, rows: s.rows.slice(-200) }), "utf8");
+	} catch {
+		// без состояния сессия теряет ответы — не повод ронять задание
+	}
+}
+
+export function clearSession(cwd: string): void {
+	try {
+		unlinkSync(statePath(cwd));
+	} catch {
+		// файла нет — и хорошо
+	}
 }
 
 interface Row {
@@ -96,19 +144,14 @@ function summaryOf(rows: Row[]): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	let current: Current | undefined;
-	let number = 0;
-	const rows: Row[] = [];
-	let backedUp = false;
-
 	const addr = () => bridgeAddress();
 
 	/** Копия .als перед первой записью за сессию — как в live.ts. */
-	async function beforeWrite(cwd: string): Promise<string> {
-		if (backedUp) return "";
+	async function beforeWrite(cwd: string, s: Session): Promise<string> {
+		if (s.backedUp) return "";
 		try {
 			const b = await backupProject(cwd, addr());
-			backedUp = true;
+			s.backedUp = true;
 			return b.path ? `Копия проекта до правок: ${b.path}. ` : `Копии нет: ${b.note}. `;
 		} catch (e) {
 			throw new Error(`Не смог сделать копию проекта перед правкой (${(e as Error).message}); в Live ничего не менял.`);
@@ -162,15 +205,16 @@ export default function (pi: ExtensionAPI) {
 			(r) => (r?.details?.number ? `♪ Задание ${r.details.number}: ${r.details.title}` : "задание сыграно"),
 		),
 		async execute(_id, p, _s, _u, ctx) {
-			if (current && !current.answered) {
+			const s = loadSession(ctx.cwd);
+			if (s.current && !s.current.answered) {
 				if (!p.skip) {
 					throw new Error(
-						`Задание ${current.number} ещё не проверено. Сначала ear_answer с ответом ученика (или ear_replay, если просит повторить). Новое задание или пропуск — только осознанно: если он сам просит пропустить, повтори с skip: true.`,
+						`Задание ${s.current.number} ещё не проверено. Сначала ear_answer с ответом ученика (или ear_replay, если просит повторить). Новое задание или пропуск — только осознанно: если он сам просит пропустить, повтори с skip: true.`,
 					);
 				}
-				rows[current.row].skipped = true;
+				s.rows[s.current.row].skipped = true;
 			}
-			const level = (([1, 2, 3] as EarLevel[]).includes(p.level as EarLevel) ? p.level : (current ? current.task.level : 1)) as EarLevel;
+			const level = (([1, 2, 3] as EarLevel[]).includes(p.level as EarLevel) ? p.level : (s.current ? s.current.task.level : 1)) as EarLevel;
 			const project = pickProject(ctx.cwd, p.path);
 			const material = buildMaterial(project);
 			if (!material) throw new Error("В этом проекте нет мелодических нот (пустые клипы или только ударные) — тренировать слух не на чем. Выбери другой трек.");
@@ -178,14 +222,15 @@ export default function (pi: ExtensionAPI) {
 			const task = makeTask(material, {
 				kind,
 				level,
-				recent: rows.slice(-2).map((h) => h.kind),
+				recent: s.rows.slice(-2).map((h) => h.kind),
 			});
-			const pre = await beforeWrite(ctx.cwd);
+			const pre = await beforeWrite(ctx.cwd, s);
 			const where = await earSlot();
-			number += 1;
+			const number = s.rows.length + 1;
 			await place(task, number, where);
-			rows.push({ kind: task.kind, level });
-			current = { task, number, track: where.track, slot: where.slot, row: rows.length - 1 };
+			s.rows.push({ kind: task.kind, level });
+			s.current = { task, number, track: where.track, slot: where.slot, row: s.rows.length - 1 };
+			saveSession(ctx.cwd, s);
 			const head = `${pre}♪ Задание ${number}: ${task.title}. Играет в Live: трек «${EAR_TRACK}», слот ${where.slot} (клип «Подсказка: Задание ${number}»).`;
 			const lines = [head, task.question, task.hint];
 			if (task.answerKind === "notes") lines.push("Сыграй на клавиатуре (с тем же темпом, без спешки), потом скажи мне — проверю ear_answer по тому, что записал.");
@@ -223,7 +268,9 @@ export default function (pi: ExtensionAPI) {
 			() => "Проверяю ответ…",
 			(r) => r?.details?.verdict ?? "проверил",
 		),
-		async execute(_id, p) {
+		async execute(_id, p, _s, _u, ctx) {
+			const s = loadSession(ctx.cwd);
+			const current = s.current;
 			if (!current) throw new Error("Сейчас нет задания на слух. Сначала ear_next.");
 			const task = current.task;
 			if (current.answered) {
@@ -268,8 +315,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			current.answered = { given: p.answer ?? "сыграно", right };
-			rows[current.row].right = right;
-			delete rows[current.row].skipped;
+			s.rows[current.row].right = right;
+			delete s.rows[current.row].skipped;
+			saveSession(ctx.cwd, s);
 			const lines = [verdict];
 			if (body) lines.push(body);
 			lines.push(extra);
@@ -294,6 +342,7 @@ export default function (pi: ExtensionAPI) {
 			(r) => (r?.details?.compare ? `играю «${r.details.compare}»` : "играю снова"),
 		),
 		async execute(_id, p, _s, _u, ctx) {
+			const current = loadSession(ctx.cwd).current;
 			if (!current) throw new Error("Сейчас нет задания на слух. Сначала ear_next.");
 			const task = current.task;
 			if (!p.compare) {
@@ -331,7 +380,8 @@ export default function (pi: ExtensionAPI) {
 			() => "Убираю трек для слуха…",
 			(r) => (r?.details?.removed ? "трек убран" : "убирать было нечего"),
 		),
-		async execute() {
+		async execute(_id, _p, _s, _u, ctx) {
+			const s = loadSession(ctx.cwd);
 			const all = await call({ cmd: "tracks" }, addr());
 			const track = (all.tracks ?? []).find((t: any) => String(t.name) === EAR_TRACK);
 			let removed: string | undefined;
@@ -339,10 +389,10 @@ export default function (pi: ExtensionAPI) {
 				const r = await call({ cmd: "remove", track: track.index, confirmed: true }, addr());
 				removed = r.removed;
 			}
-			const summary = summaryOf(rows);
-			current = undefined;
+			const summary = summaryOf(s.rows);
+			clearSession(ctx.cwd);
 			const head = removed ? `Трек «${removed}» убран из Live.` : `Трека «${EAR_TRACK}» в Live нет — убирать нечего.`;
-			return text(`${head} ${summary}`, { removed, summary, total: rows.length, right: rows.filter((r) => r.right === true).length });
+			return text(`${head} ${summary}`, { removed, summary, total: s.rows.length, right: s.rows.filter((r) => r.right === true).length });
 		},
 	});
 }

@@ -515,6 +515,26 @@ test("ear_replay с compare: играет вариант ученика отде
 	}
 });
 
+test("состояние сессии: ответ переживает перезапуск (новый экземпляр инструментов)", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "mm-ear-"));
+	project(dir);
+	const live = await fakeLive();
+	try {
+		// первый «процесс»: задание, второй — проверка: состояние читается из файла
+		const t1 = tools(live.port);
+		await fixed(0.42, () => run(t1.get("ear_next"), { path: "Ночь.als", kind: "interval", level: 1 }, dir));
+		const t2 = tools(live.port);
+		const out = await run(t2.get("ear_answer"), { answer: "квинта" }, dir);
+		assert.match(out.content[0].text, /Верно|Неверно/);
+		assert.ok(out.details.answer, "после проверки ответ называется");
+		// и повторить без перезапуска тоже можно
+		const again = await run(t2.get("ear_replay"), {}, dir);
+		assert.match(again.content[0].text, /ещё раз/);
+	} finally {
+		live.close();
+	}
+});
+
 test("ear_finish: убирает только свой трек и отдаёт итог", async () => {
 	const dir = mkdtempSync(path.join(tmpdir(), "mm-ear-"));
 	project(dir);
@@ -567,5 +587,5 @@ test("ear_next: копия проекта перед правкой и поня�
 		}),
 	);
 	const t2 = tools(1);
-	await assert.rejects(run(t2.get("ear_next"), { path: "Только ударные.als" }, dir), /только ударные|нет мелодических нот/);
+	await assert.rejects(run(t2.get("ear_next"), { path: "Только ударные.als", skip: true }, dir), /только ударные|нет мелодических нот/);
 });
