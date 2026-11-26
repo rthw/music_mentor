@@ -15,6 +15,7 @@ const alsExt = await import("../extensions/als.ts");
 const liveExt = await import("../extensions/live.ts");
 const logExt = await import("../extensions/log.ts");
 const updExt = await import("../extensions/update.ts");
+const audioExt = await import("../extensions/audio.ts");
 const quietExt = await import("../extensions/quiet.ts");
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
@@ -88,6 +89,7 @@ test("все инструменты расширений умеют тихий �
 	for (const [mod, names] of [
 		[alsExt, ["project_list", "project_summary", "clip_notes", "project_analysis", "project_diff"]],
 		[liveExt, ["live_ping", "live_state", "live_clip_notes", "live_browser", "live_add_track", "live_add_clip", "live_load_device", "live_set_param", "live_remove", "live_play", "live_stop"]],
+		[audioExt, ["audio_list", "audio_analyze", "audio_compare"]],
 		[logExt, ["mentor_log"]],
 		[updExt, ["mentor_update"]],
 	] as const) {
