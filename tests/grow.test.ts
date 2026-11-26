@@ -409,6 +409,7 @@ test("recipe_save / my_tools_save / my_tools_admin: инструменты ра�
 	// выключенные функции — заметка в первый ход
 	await h.call("my_tools_admin", { action: "off" }, w);
 	const note: any[] = [];
+	await h.emit("session_start", {}, { cwd: w, ui: { notify: (m: string) => note.push(m) } });
 	const first = await h.emit("before_agent_start", { messageType: "user" }, { cwd: w, ui: { notify: (m: string) => note.push(m) } });
 	assert.match(first[0].message.content, /выключены/);
 	assert.match(note[0], /почини мои функции/);

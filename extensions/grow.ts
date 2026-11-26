@@ -32,16 +32,19 @@ export default function (pi: ExtensionAPI, deps: GrowDeps = {}) {
 	// «Мои функции выключены» (аварийный выключатель сработал или ученик попросил): один раз за сессию —
 	// строка в окне и скрытая заметка в первый ход, чтобы агент предложил починить.
 	let told = false;
-	pi.on("before_agent_start", (event: any, ctx: any) => {
-		if (told || event?.messageType !== "user") return;
-		told = true;
-		const why = disabledReason(myToolsDir(ctx.cwd));
-		if (!why) return;
+	pi.on("session_start", (_e: any, ctx: any) => {
+		if (!disabledReason(myToolsDir(ctx.cwd))) return;
 		try {
 			ctx.ui?.notify?.("Мои функции выключены — скажи агенту «почини мои функции».", "warning");
 		} catch {
 			// нет окна — не беда
 		}
+	});
+	pi.on("before_agent_start", (event: any, ctx: any) => {
+		if (told || event?.messageType !== "user") return;
+		told = true;
+		const why = disabledReason(myToolsDir(ctx.cwd));
+		if (!why) return;
 		return { message: { customType: "mentor-my-tools-off", content: `Свои функции ученика сейчас выключены: ${why}. Если он не просил их выключить — одной строкой предложи починить (my_tools_admin: list, check; правка файла через my_tools_save), а не молчи.`, display: false } };
 	});
 
