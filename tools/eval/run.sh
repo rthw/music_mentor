@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Поведение наставника: 5 сценариев через `pi -p` на фикстурах (spec §7).
+# Поведение наставника: 8 сценариев через `pi -p` на фикстурах (spec §7).
 #
 # Изоляция обязательна: на машине автора pi подхватывает чужие скиллы (~/.agents/skills, пакеты),
 # поэтому у прогона свои HOME и PI_CODING_AGENT_DIR, а рабочая папка — копия template/.
 #
 # Запуск (ключ берётся из хранилища и передаётся только в окружение процесса):
-#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 7
+#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 8
 #   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03      # только выбранные
 #
 # Ответы: ~/.local/state/music_mentor/eval/runs/<дата_время>/*.md (или OUT=<папка>).
@@ -70,10 +70,11 @@ touch -d "2026-11-20 19:00" "$PROJECTS/Оркестр.als"
 
 # Рабочая папка: копия template/. Для сценариев 2–5 — «вторая сессия» с профилем и журналом,
 # для 06 — профиль ученика, который хочет играть руками (instrument / wants_to_learn).
-make_workspace() { # $1 = first|second|play, $2 = куда
+make_workspace() { # $1 = first|second|play|ear|sound, $2 = куда
 	local kind="$1" dest="$2" src="second_session"
 	cp -r "$REPO/template" "$dest"
 	[ "$kind" = "play" ] && src="play"
+	[ "$kind" = "sound" ] && src="second_session"
 	[ "$kind" = "ear" ] && src="ear"
 	if [ "$kind" != "first" ]; then
 		cp "$REPO/tools/eval/fixtures/$src/profile.md" "$dest/learner/profile.md"
@@ -92,7 +93,17 @@ build_recording() { # $1 = папка проектов
 	fi
 }
 
-run_one() { # $1 = файл сценария, $2 = first|second|play|ear
+# Экспорт ученика для сценария 08 (звук): «мутный» wav и референс, сгенерированные
+# (tools/eval/fixtures/audio/build_wavs.ts), кладутся рядом с проектами, как после File → Export.
+build_sound() { # $1 = папка проектов
+	[ -f "$1/Ночь — экспорт.wav" ] && return
+	if ! node "$REPO/tools/eval/fixtures/audio/build_wavs.ts" "$1" >/dev/null; then
+		echo "   не собрал wav для 08 — см. вывод выше" >&2
+	fi
+	touch -d "2026-11-26 12:00" "$1/Ночь — экспорт.wav" "$1/Референс.wav" 2>/dev/null
+}
+
+run_one() { # $1 = файл сценария, $2 = first|second|play|ear|sound
 	local scenario="$1" kind="$2" name ws log dir turn prompt code=0 turns=0 one=0 bridge_pid=""
 	# Сценарию со слухом нужен мост: настоящего Live в прогоне нет, поэтому поднимаем заглушку
 	# с тем же протоколом (tools/eval/fixtures/ear/fake_bridge.ts) и гасим её по своему PID.
@@ -111,6 +122,7 @@ run_one() { # $1 = файл сценария, $2 = first|second|play|ear
 	make_workspace "$kind" "$ws"
 	log="$OUT/$name.md"
 	[ "$kind" = "play" ] && build_recording "$PROJECTS"
+	[ "$kind" = "sound" ] && build_sound "$PROJECTS"
 	mkdir -p "$dir"
 	# Ходы разделены строкой «--- ход ---»: обычный сценарий — один ход. Между ходами
 	# сохраняется сессия pi (--session-id), поэтому второй ход — продолжение того же урока.
@@ -200,5 +212,6 @@ run "$REPO/tools/eval/scenarios/04-chill.txt" second
 run "$REPO/tools/eval/scenarios/05-bass.txt" second
 run "$REPO/tools/eval/scenarios/06-play.txt" play
 run "$REPO/tools/eval/scenarios/07-ear.txt" ear
+run "$REPO/tools/eval/scenarios/08-sound.txt" sound
 
 echo "Готово: $OUT"

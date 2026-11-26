@@ -35,7 +35,7 @@ export function kickLine(a: AudioAnalysis): string {
 			? `Бочка/бас: низ нерегулярный (${k.count} низких онсетов), по цифрам вердикта нет.`
 			: "Бочка/бас: чётких регулярных ударов в полосе 40-120 Гц не нашёл, вердикта нет.";
 	}
-	const base = `${k.count} ударов раз в ~${k.intervalMs} мс, в момент удара низ 40-120 Гц громче, чем между ударами, на ${num(k.stickOutDb)} дБ`;
+	const base = `${k.count} ударов раз в ~${k.intervalMs} мс, в момент удара низ 40-120 Гц выше, чем между ударами, на ${num(Math.max(0, k.stickOutDb))} дБ`;
 	switch (k.verdict) {
 		case "clear":
 			return `Бочка/бас: ${base}: бочка читается над басом.`;

@@ -45,7 +45,7 @@ export function compareAnalyses(a: AudioAnalysis, ref: AudioAnalysis): Compariso
 	if (notable.length) {
 		lines.push(`Полосы (ты минус референс, дБ): ${notable.map((b) => `${b.name} ${b.range} ${signed(b.diff)}`).join("; ")}. Остальные в пределах ${BAND_NOTICE_DB} дБ.`);
 		const strongest = notable[0];
-		lines.push(`Главное: ${strongest.diff > 0 ? "больше" : "меньше"} всего у тебя ${strongest.name} (${strongest.range}) — на ${num(Math.abs(strongest.diff))} дБ ${strongest.diff > 0 ? "больше" : "меньше"}.`);
+		lines.push(`Главная разница — ${strongest.name} (${strongest.range}): у тебя на ${num(Math.abs(strongest.diff))} дБ ${strongest.diff > 0 ? "больше" : "меньше"}.`);
 	} else lines.push(`Полосы близки: расхождение везде меньше ${BAND_NOTICE_DB} дБ.`);
 
 	if (below50Diff <= -4) lines.push(`Ниже 50 Гц у тебя заметно меньше: ${num(a.below50, 0)} против ${num(ref.below50, 0)} дБ от общей — саба почти нет.`);
