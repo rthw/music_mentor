@@ -349,7 +349,7 @@ export function pluralN(n: number, few: string, many: string): string {
 }
 
 function fmtBeats(b: number): string {
-	const s = Math.abs(b) < 1e-9 ? "0" : String(Math.round(b * 1000) / 1000).replace(".", ",");
+	const s = Math.abs(b) < 1e-9 ? "0" : String(Math.round(b * 100) / 100).replace(".", ",");
 	return `${b > 0 ? "+" : b < 0 ? "−" : ""}${s} ${pluralDoli(Math.abs(b))}`;
 }
 

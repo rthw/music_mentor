@@ -66,45 +66,73 @@ cp "$REPO/tests/fixtures/als/12/vm_orchestral.als" "$PROJECTS/Оркестр.als
 touch -d "2026-11-25 20:00" "$PROJECTS/Ночь.als"
 touch -d "2026-11-20 19:00" "$PROJECTS/Оркестр.als"
 
-# Рабочая папка: копия template/. Для сценариев 2–5 — «вторая сессия» с профилем и журналом.
-make_workspace() { # $1 = second|first, $2 = куда
-	local kind="$1" dest="$2"
+# Рабочая папка: копия template/. Для сценариев 2–5 — «вторая сессия» с профилем и журналом,
+# для 06 — профиль ученика, который хочет играть руками (instrument / wants_to_learn).
+make_workspace() { # $1 = first|second|play, $2 = куда
+	local kind="$1" dest="$2" src="second_session"
 	cp -r "$REPO/template" "$dest"
-	if [ "$kind" = "second" ]; then
-		cp "$REPO/tools/eval/fixtures/second_session/profile.md" "$dest/learner/profile.md"
-		cp "$REPO/tools/eval/fixtures/second_session/log.jsonl" "$dest/learner/log.jsonl"
+	[ "$kind" = "play" ] && src="play"
+	if [ "$kind" != "first" ]; then
+		cp "$REPO/tools/eval/fixtures/$src/profile.md" "$dest/learner/profile.md"
+		cp "$REPO/tools/eval/fixtures/$src/log.jsonl" "$dest/learner/log.jsonl"
 	fi
 }
 
-run_one() { # $1 = файл сценария, $2 = first|second
-	local scenario="$1" kind="$2" name prompt ws log
+# «Запись» ученика для сценария 06: .als с его попыткой сыграть бас «Ночи» (ноты с ошибками,
+# сборка — tools/eval/fixtures/play/build_recording.ts). Без Live мост недоступен, поэтому
+# сыгранное берётся из проекта — так же, как это делает play_check с played_path.
+build_recording() { # $1 = папка проектов
+	local file="$1/Ночь — запись.als"
+	[ -f "$file" ] && return
+	if ! node "$REPO/tools/eval/fixtures/play/build_recording.ts" "$file"; then
+		echo "   не собрал «запись» для 06 — см. вывод выше" >&2
+	fi
+}
+
+run_one() { # $1 = файл сценария, $2 = first|second|play
+	local scenario="$1" kind="$2" name ws log dir turn prompt code=0 turns=0 one=0
 	name="$(basename "$scenario" .txt)"
-	prompt="$(cat "$scenario")"
 	ws="$WORKROOT/work-$name"
+	dir="$WORKROOT/turns-$name"
 	make_workspace "$kind" "$ws"
 	log="$OUT/$name.md"
-	echo "== $name ($kind): $prompt"
-	(
-		cd "$ws" || exit 1
-		HOME="$WORKROOT/home" \
-		PI_CODING_AGENT_DIR="$AGENT_DIR" \
-		PI_SKIP_VERSION_CHECK=1 \
-		PI_TELEMETRY=0 \
-		MM_ROOT="$WORKROOT/mm-root-$name" \
-		timeout "$TIMEOUT" "$PI" -p --no-session "$prompt"
-	) >"$log" 2>&1
-	local code=$?
-	if [ $code -ne 0 ]; then
-		echo "   код $code — см. $log"
-	else
-		echo "   ок → $log"
-	fi
+	[ "$kind" = "play" ] && build_recording "$PROJECTS"
+	mkdir -p "$dir"
+	# Ходы разделены строкой «--- ход ---»: обычный сценарий — один ход. Между ходами
+	# сохраняется сессия pi (--session-id), поэтому второй ход — продолжение того же урока.
+	awk -v d="$dir" 'BEGIN { n = 1; f = sprintf("%s/%02d.txt", d, n) } /^--- ход ---$/ { n++; f = sprintf("%s/%02d.txt", d, n); next } { print > f }' "$scenario"
+	: >"$log"
+	for turn in "$dir"/*.txt; do
+		prompt="$(cat "$turn")"
+		turns=$((turns + 1))
+		echo "== $name ($kind), ход $turns: $prompt"
+		if [ "$turns" -gt 1 ]; then
+			{ echo; echo "### Ход $turns"; echo; echo "> $prompt"; echo; } >>"$log"
+		fi
+		(
+			cd "$ws" || exit 1
+			HOME="$WORKROOT/home" \
+			PI_CODING_AGENT_DIR="$AGENT_DIR" \
+			PI_SKIP_VERSION_CHECK=1 \
+			PI_TELEMETRY=0 \
+			MM_ROOT="$WORKROOT/mm-root-$name" \
+			timeout "$TIMEOUT" "$PI" -p --session-id "mm-eval-$name" "$prompt"
+		) >>"$log" 2>&1
+		one=$?
+		if [ $one -ne 0 ]; then
+			code=$one
+			echo "   ход $turns: код $one — см. $log"
+		else
+			echo "   ход $turns: ок → $log"
+		fi
+	done
 	{
 		echo
 		echo "---"
 		echo "сценарий: $name"
 		echo "режим: $kind"
 		echo "модель: $MODEL"
+		echo "ходов: $turns"
 		echo "код: $code"
 	} >>"$log"
 }
@@ -153,5 +181,6 @@ run "$REPO/tools/eval/scenarios/02-track.txt" second
 run "$REPO/tools/eval/scenarios/03-sidechain.txt" second
 run "$REPO/tools/eval/scenarios/04-chill.txt" second
 run "$REPO/tools/eval/scenarios/05-bass.txt" second
+run "$REPO/tools/eval/scenarios/06-play.txt" play
 
 echo "Готово: $OUT"
