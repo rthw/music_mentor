@@ -23,7 +23,7 @@ import sys
 
 from .protocol import BridgeError, string_types, text_type, to_text
 
-BRIDGE_VERSION = 1
+BRIDGE_VERSION = 2
 PREFIX = "Подсказка: "
 HINT_COLOR = 0x2E9BFF  # фиксированный цвет треков и клипов-подсказок
 MAX_CLIP_BEATS = 512.0
@@ -287,6 +287,41 @@ def cmd_clip_notes(ctx, args):
     if not clip.is_midi_clip:
         raise BridgeError("В слоте %d аудиоклип «%s»: у него нет нот." % (slot_index, _text(clip.name)))
     return {"exists": True, "track": index, "slot": slot_index, "name": _text(clip.name), "length": clip.length,
+            "loop_start": float(getattr(clip, "loop_start", 0.0)), "notes": read_notes(clip)}
+
+
+def cmd_last_clip(ctx, args):
+    """Последний записанный или выделенный клип на треке - для разбора игры руками.
+
+    В LOM нет времени записи, поэтому порядок такой:
+      1) клип, который сейчас играет (только что записали и он зациклился),
+      2) клип, выбранный в Live (detail_clip),
+      3) клип в последнем занятом слоте: запись уходит в новый слот в конце трека.
+    Аудиоклипы пропускаем: нот в них нет.
+    """
+    index, track = _track_arg(ctx, args)
+    slots = list(track.clip_slots)
+    occupied = [(i, s.clip) for i, s in enumerate(slots) if s.has_clip]
+    if not occupied:
+        return {"exists": False, "track": index, "name": _text(track.name), "slot_count": len(slots)}
+    midi = [item for item in occupied if item[1].is_midi_clip]
+    if not midi:
+        return {"exists": True, "is_midi_clip": False, "track": index, "name": _text(track.name),
+                "slot": occupied[-1][0], "clip": _text(occupied[-1][1].name)}
+    slot_index, clip = midi[-1]
+    how = "last"
+    detail = _safe(lambda: ctx.song.view.detail_clip)
+    if detail is not None:
+        for item in midi:
+            if item[1] is detail:
+                slot_index, clip, how = item[0], item[1], "selected"
+                break
+    playing = [item for item in midi if getattr(item[1], "is_playing", False)]
+    if playing:
+        slot_index, clip = playing[0]
+        how = "playing"
+    return {"exists": True, "is_midi_clip": True, "track": index, "track_name": _text(track.name),
+            "slot": slot_index, "name": _text(clip.name), "length": clip.length, "how": how,
             "loop_start": float(getattr(clip, "loop_start", 0.0)), "notes": read_notes(clip)}
 
 
@@ -579,6 +614,7 @@ COMMANDS = {
     "song": cmd_song,
     "tracks": cmd_tracks,
     "clip_notes": cmd_clip_notes,
+    "last_clip": cmd_last_clip,
     "browser": cmd_browser,
     "add_midi_track": cmd_add_midi_track,
     "add_clip": cmd_add_clip,

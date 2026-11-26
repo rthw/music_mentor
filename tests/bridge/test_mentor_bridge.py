@@ -117,6 +117,34 @@ class ReadTests(Base, unittest.TestCase):
         self.assertEqual(call(self.ctx, cmd="clip_notes", track=0, slot=1)["result"], {"exists": False, "track": 0, "slot": 1})
         self.assertFalse(call(self.ctx, cmd="clip_notes", track=1, slot=1)["ok"])  # аудиоклип без нот
 
+    def test_last_clip_finds_newest_recording(self):
+        self.assertTrue(call(self.ctx, cmd="add_clip", track="Бас", slot=2, length_beats=4,
+                             notes=[{"pitch": 40, "start": 0, "duration": 1}], name="моя запись")["ok"])
+        r = call(self.ctx, cmd="last_clip", track="Бас")["result"]
+        self.assertEqual((r["slot"], r["how"]), (2, "last"))
+        self.assertEqual([n["pitch"] for n in r["notes"]], [40])
+
+    def test_last_clip_prefers_playing_and_selected(self):
+        self.assertTrue(call(self.ctx, cmd="add_clip", track="Бас", slot=2, length_beats=4,
+                             notes=[{"pitch": 41, "start": 0, "duration": 1}], name="b")["ok"])
+        # запись только что зациклилась в слоте 2 — он играет
+        self.bass.clip_slots[2].clip.is_playing = True
+        self.assertEqual(call(self.ctx, cmd="last_clip", track="Бас")["result"]["how"], "playing")
+        self.bass.clip_slots[2].clip.is_playing = False
+        # ученик выделил клип в первом слоте — уважаем выбор
+        self.ctx.song.view.detail_clip = self.bass.clip_slots[0].clip
+        r = call(self.ctx, cmd="last_clip", track="Бас")["result"]
+        self.assertEqual((r["slot"], r["how"], r["name"]), (0, "selected", "Мой бас"))
+
+    def test_last_clip_edges(self):
+        self.assertEqual(call(self.ctx, cmd="last_clip", track="Бас")["result"]["how"], "last")
+        empty = self.hint()  # пустой трек-подсказка
+        r = call(self.ctx, cmd="last_clip", track=empty)["result"]
+        self.assertEqual((r["exists"], r["slot_count"]), (False, 4))
+        audio = call(self.ctx, cmd="last_clip", track="Ударные")["result"]
+        self.assertEqual((audio["exists"], audio["is_midi_clip"]), (True, False))
+        self.assertFalse(call(self.ctx, cmd="last_clip", track="Нет такого")["ok"])
+
     def test_browser(self):
         self.assertIn("instruments", call(self.ctx, cmd="browser")["result"]["roots"])
         r = call(self.ctx, cmd="browser", path="instruments")["result"]
