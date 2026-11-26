@@ -8,12 +8,13 @@
 #   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 5
 #   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03      # только выбранные
 #
-# Ответы: tools/eval/runs/<дата_время>/*.md (или OUT=<папка>).
+# Ответы: ~/.local/state/music_mentor/eval/runs/<дата_время>/*.md (или OUT=<папка>).
 set -u -o pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODEL="${MM_EVAL_MODEL:-deepseek-v4-pro}"
-OUT="${OUT:-$REPO/tools/eval/runs/$(date +%Y-%m-%d_%H%M)}"
+# Ответы — вне репозитория: в них пути машины, а тест «нет путей автора» ходит по всему дереву.
+OUT="${OUT:-${XDG_STATE_HOME:-$HOME/.local/state}/music_mentor/eval/runs/$(date +%Y-%m-%d_%H%M)}"
 TIMEOUT="${MM_EVAL_TIMEOUT:-600}"
 
 if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
@@ -23,8 +24,12 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
 fi
 
 PI="$(command -v pi || true)"
-# Симлинк mise-шима тянет за собой mise, а у нас подменён HOME: берём настоящий бинарник.
-[ -n "$PI" ] && PI="$(readlink -f "$PI")"
+# В PATH «secret run» первым стоит shim mise: readlink уводит в сам mise. Спрашиваем mise, где
+# лежит настоящий бинарник, — иначе запускать будем mise с чужими флагами.
+if [ -n "$PI" ]; then
+	real_pi="$(mise which pi 2>/dev/null || true)"
+	PI="${real_pi:-$(readlink -f "$PI")}"
+fi
 if [ -z "$PI" ]; then
 	echo "pi не найден в PATH." >&2
 	exit 2
@@ -108,6 +113,29 @@ echo "Репозиторий: $REPO"
 echo "Модель: $MODEL"
 echo "Ответы: $OUT"
 echo "Изоляция: HOME=$WORKROOT/home PI_CODING_AGENT_DIR=$AGENT_DIR"
+
+# Скилл виден pi только если разобрался фронтматтер (см. tests/skills.test.ts). Проверяем это
+# механически: дампим системный промпт сессии и ищем там блок <available_skills>.
+SKILL_CHECK="$OUT/00-skill-check.txt"
+mkdir -p "$WORKROOT/skillcheck"
+(
+	cd "$WORKROOT/skillcheck" || exit 1
+	HOME="$WORKROOT/home" \
+	PI_CODING_AGENT_DIR="$AGENT_DIR" \
+	PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0 \
+	MM_EVAL_PROMPT_DUMP="$WORKROOT/prompt.txt" \
+	MM_ROOT="$WORKROOT/mm-root-skillcheck" \
+	timeout "$TIMEOUT" "$PI" -p --no-session -e "$REPO/tools/eval/dump_prompt.ts" "ок" >/dev/null 2>&1
+) || echo "   pi не отработал для проверки скилла"
+{
+	echo "# Виден ли скилл mentor в сессии pi (блок <available_skills> системного промпта)"
+	grep -A 4 '<available_skills>' "$WORKROOT/prompt.txt" 2>/dev/null | head -40
+} >"$SKILL_CHECK"
+if grep -q '<name>mentor</name>' "$SKILL_CHECK"; then
+	echo "скилл mentor виден pi: да"
+else
+	echo "скилл mentor виден pi: НЕТ — см. $SKILL_CHECK"
+fi
 
 want=("$@")
 run() { # $1 = файл, $2 = режим
