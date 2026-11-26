@@ -296,6 +296,21 @@ function Clear-KeyFromHistory {
 		}
 		Clear-History -ErrorAction SilentlyContinue
 	} catch { }
+	# Открытка запускает установку через Win+R: строка с ключом остаётся в RunMRU (история «Выполнить»).
+	try {
+		$mru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
+		if (Test-Path -LiteralPath $mru) {
+			$props = Get-ItemProperty -LiteralPath $mru
+			$order = [string]$props.MRUList
+			foreach ($pr in $props.PSObject.Properties) {
+				if ($pr.Name -match '^[a-z]$' -and ([string]$pr.Value) -match 'MM_KEY') {
+					Remove-ItemProperty -LiteralPath $mru -Name $pr.Name -ErrorAction SilentlyContinue
+					$order = $order.Replace($pr.Name, '')
+				}
+			}
+			Set-ItemProperty -LiteralPath $mru -Name MRUList -Value $order -ErrorAction SilentlyContinue
+		}
+	} catch { }
 }
 
 function Step-Workspace {

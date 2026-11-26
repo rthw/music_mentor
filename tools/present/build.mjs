@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Собирает страницу-открытку present.whimsical.work.
-// Установочный .cmd (с ключом DeepSeek друга) шифруется паролем: PBKDF2-SHA256 + AES-GCM, в браузере
+// Строка установки для Win+R (с ключом DeepSeek друга) шифруется паролем: PBKDF2-SHA256 + AES-GCM, в браузере
 // расшифровывается WebCrypto. Ключ в открытом виде в страницу не попадает. Готовая страница — вне репо.
 //   secret run deepseek_music_mentor,present_password -- node tools/present/build.mjs <тег> <папка-выхода>
 // Пароль — только из хранилища `secret` (present_password): репо публичный, в коде его быть не должно.
@@ -28,15 +28,10 @@ if (!passwords.length) {
 }
 
 const url = `https://raw.githubusercontent.com/rthw/music_mentor/${tag}/install.ps1`;
-// Только ASCII: cmd.exe читает файл в OEM-кодировке.
-const cmd = [
-	"@echo off",
-	"title Music mentor setup",
-	`powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:MM_KEY='${key}'; $env:MM_TAG='${tag}'; irm ${url} | iex"`,
-	"echo.",
-	"pause",
-	"",
-].join("\r\n");
+// Строка для Win+R («Выполнить»): там лимит 259 символов. -NoExit — окно не закрывается после установки.
+// Установщик сам вычищает её из истории Win+R (RunMRU) и PowerShell.
+const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "$env:MM_KEY='${key}'; $env:MM_TAG='${tag}'; irm ${url} | iex"`;
+if (cmd.length > 259) throw new Error(`строка для Win+R длиннее 259 символов (${cmd.length})`);
 
 const ITER = 600_000;
 const enc = new TextEncoder();
