@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Поведение наставника: 8 сценариев через `pi -p` на фикстурах (spec §7).
+# Поведение наставника: 9 сценариев через `pi -p` на фикстурах (spec §7).
 #
 # Изоляция обязательна: на машине автора pi подхватывает чужие скиллы (~/.agents/skills, пакеты),
 # поэтому у прогона свои HOME и PI_CODING_AGENT_DIR, а рабочая папка — копия template/.
 #
 # Запуск (ключ берётся из хранилища и передаётся только в окружение процесса):
-#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 8
+#   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh            # все 9
 #   secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03      # только выбранные
 #
 # Ответы: ~/.local/state/music_mentor/eval/runs/<дата_время>/*.md (или OUT=<папка>).
@@ -70,11 +70,12 @@ touch -d "2026-11-20 19:00" "$PROJECTS/Оркестр.als"
 
 # Рабочая папка: копия template/. Для сценариев 2–5 — «вторая сессия» с профилем и журналом,
 # для 06 — профиль ученика, который хочет играть руками (instrument / wants_to_learn).
-make_workspace() { # $1 = first|second|play|ear|sound, $2 = куда
+make_workspace() { # $1 = first|second|play|ear|sound|grow, $2 = куда
 	local kind="$1" dest="$2" src="second_session"
 	cp -r "$REPO/template" "$dest"
 	[ "$kind" = "play" ] && src="play"
 	[ "$kind" = "sound" ] && src="second_session"
+	[ "$kind" = "grow" ] && src="second_session"
 	[ "$kind" = "ear" ] && src="ear"
 	if [ "$kind" != "first" ]; then
 		cp "$REPO/tools/eval/fixtures/$src/profile.md" "$dest/learner/profile.md"
@@ -120,6 +121,15 @@ run_one() { # $1 = файл сценария, $2 = first|second|play|ear|sound
 	ws="$WORKROOT/work-$name"
 	dir="$WORKROOT/turns-$name"
 	make_workspace "$kind" "$ws"
+	if [ "$kind" = "grow" ]; then
+		# T1914: рецепты и свои функции подключены, как это делает установщик (Set-PiSettings), а заявки уходят
+		# на локальный приёмник с глушилкой вместо Telegram — настоящему автору ничего не приходит.
+		node -e 'const f=process.argv[1],s=JSON.parse(require("fs").readFileSync(f,"utf8"));s.skills=[process.argv[2]+"/learner/recipes"];s.packages=[...s.packages,process.argv[2]+"/learner/my_tools"];require("fs").writeFileSync(f,JSON.stringify(s,null,2))' "$AGENT_DIR/settings.json" "$ws"
+		WISH_PORT=8794 WISH_JOURNAL="$OUT/wish_journal.jsonl" WISH_NOTIFY=/usr/bin/true node "$REPO/tools/wish/wish_receiver.mjs" >"$WORKROOT/wish_receiver.log" 2>&1 &
+		bridge_pid=$!
+		BRIDGE_PID=$bridge_pid
+		sleep 0.7
+	fi
 	log="$OUT/$name.md"
 	[ "$kind" = "play" ] && build_recording "$PROJECTS"
 	[ "$kind" = "sound" ] && build_sound "$PROJECTS"
@@ -144,6 +154,7 @@ run_one() { # $1 = файл сценария, $2 = first|second|play|ear|sound
 			MM_ROOT="$WORKROOT/mm-root-$name" \
 			MM_LIVE_HOST=127.0.0.1 \
 			MM_LIVE_PORT=9878 \
+			MM_WISH_URL="http://127.0.0.1:8794/api/wish" \
 			timeout "$TIMEOUT" "$PI" -p --session-id "mm-eval-$name" "$prompt" </dev/null
 		) >>"$log" 2>&1
 		one=$?
@@ -213,5 +224,6 @@ run "$REPO/tools/eval/scenarios/05-bass.txt" second
 run "$REPO/tools/eval/scenarios/06-play.txt" play
 run "$REPO/tools/eval/scenarios/07-ear.txt" ear
 run "$REPO/tools/eval/scenarios/08-sound.txt" sound
+run "$REPO/tools/eval/scenarios/09-grow.txt" grow
 
 echo "Готово: $OUT"

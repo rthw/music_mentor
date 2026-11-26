@@ -9,7 +9,8 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { proto } from "./wish_proto.ts";
 import { markRun, mmRoot, shouldRunDaily, stampPath } from "./session.ts";
@@ -40,6 +41,45 @@ export interface Draft {
 	text: string;
 	/** Сколько сообщений ученика было к моменту черновика: «да» — следующее. */
 	seq: number;
+	/** Когда составлен (мс): старый черновик не отправляем. */
+	at: number;
+}
+
+export interface GateState {
+	seq: number;
+	last: string;
+	draft?: Draft;
+}
+
+export interface GateStore {
+	load(): GateState;
+	save(s: GateState): void;
+}
+
+/** Черновик живёт полчаса: «да» через день к вчерашней заявке не относится. */
+export const DRAFT_TTL_MS = 30 * 60 * 1000;
+
+/** Состояние замка в файле: переживает /reload и перезапуск процесса pi (разговор продолжается тем же «да»). */
+export function fileGateStore(cwd: string, dir = tmpdir()): GateStore {
+	const file = path.join(dir, `mm_wish_gate_${createHash("sha1").update(path.resolve(cwd).toLowerCase()).digest("hex").slice(0, 12)}.json`);
+	return {
+		load() {
+			try {
+				const v = JSON.parse(readFileSync(file, "utf8"));
+				if (v && typeof v.seq === "number") return { seq: v.seq, last: String(v.last ?? ""), draft: v.draft };
+			} catch {
+				// нет файла — начинаем с нуля
+			}
+			return { seq: 0, last: "" };
+		},
+		save(s) {
+			try {
+				writeFileSync(file, JSON.stringify(s), "utf8");
+			} catch {
+				// без файла замок работает в памяти процесса
+			}
+		},
+	};
 }
 
 /**
@@ -48,36 +88,53 @@ export interface Draft {
  * (событие input), а не модель.
  */
 export class ConsentGate {
-	private seq = 0;
-	private last = "";
-	private draft?: Draft;
+	private mem: GateState = { seq: 0, last: "" };
+	private store: GateStore | undefined;
+	private now: () => number;
+	constructor(store?: GateStore, now: () => number = Date.now) {
+		this.store = store;
+		this.now = now;
+	}
+
+	private get(): GateState {
+		return this.store ? this.store.load() : this.mem;
+	}
+	private put(s: GateState): void {
+		if (this.store) this.store.save(s);
+		else this.mem = s;
+	}
 
 	/** Сообщение ученика (не служебное). */
 	onUserInput(text: string): void {
-		this.seq++;
-		this.last = String(text ?? "");
+		const s = this.get();
+		this.put({ ...s, seq: s.seq + 1, last: String(text ?? "") });
 	}
 
 	setDraft(text: string): Draft {
-		this.draft = { text: String(text).trim(), seq: this.seq };
-		return this.draft;
+		const s = this.get();
+		const draft = { text: String(text).trim(), seq: s.seq, at: this.now() };
+		this.put({ ...s, draft });
+		return draft;
 	}
 
 	cancel(): void {
-		this.draft = undefined;
+		const s = this.get();
+		this.put({ ...s, draft: undefined });
 	}
 
 	hasDraft(): boolean {
-		return !!this.draft;
+		return !!this.get().draft;
 	}
 
 	/** Можно ли отправлять: возвращает текст или причину отказа. */
 	approve(): { ok: true; text: string } | { ok: false; reason: string } {
-		const d = this.draft;
+		const s = this.get();
+		const d = s.draft;
 		if (!d) return { ok: false, reason: "нет черновика: сначала action=draft и покажи текст ученику" };
-		if (this.seq <= d.seq) return { ok: false, reason: "ученик ещё не ответил на черновик: покажи ему текст и жди «да»" };
-		if (this.seq > d.seq + 1) return { ok: false, reason: "после черновика ученик писал о другом: покажи заявку ещё раз и жди «да»" };
-		if (!isYes(this.last)) return { ok: false, reason: `ученик не согласился (его ответ: «${this.last.slice(0, 60)}»): исправь заявку или отмени` };
+		if (this.now() - d.at > DRAFT_TTL_MS) return { ok: false, reason: "черновик устарел: покажи заявку ещё раз и жди «да»" };
+		if (s.seq <= d.seq) return { ok: false, reason: "ученик ещё не ответил на черновик: покажи ему текст и жди «да»" };
+		if (s.seq > d.seq + 1) return { ok: false, reason: "после черновика ученик писал о другом: покажи заявку ещё раз и жди «да»" };
+		if (!isYes(s.last)) return { ok: false, reason: `ученик не согласился (его ответ: «${s.last.slice(0, 60)}»): исправь заявку или отмени` };
 		return { ok: true, text: d.text };
 	}
 }

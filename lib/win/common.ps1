@@ -761,6 +761,7 @@ function Write-Launcher {
 	# Аварийный выключатель своих функций (T1914): если pi закончился с кодом != 0, лаунчер зовёт
 	# lib\mm\guard.ts; тот проверяет, не расширение из learner\my_tools ли виновато, и при «да» выключает пакет,
 	# печатает одну строку и возвращает 10 — тогда pi запускается ещё раз. Нет guard.ts (старое приложение) — как раньше.
+	# pi.cmd — батник: без `call` управление в лаунчер не вернулось бы и выключатель не сработал (проверено в VM).
 	param([string]$Path)
 	$p = Get-MmPaths
 	$root = $p.Root
@@ -776,7 +777,7 @@ function Write-Launcher {
 		'if not exist "%MM_GUARD%" goto plain'
 		'set "MM_T0="'
 		'for /f %%t in (''node -e "console.log(Date.now())"'') do set "MM_T0=%%t"'
-		'"%MM_PI%" %*'
+		'call "%MM_PI%" %*'
 		'set "MM_RC=%ERRORLEVEL%"'
 		'if "%MM_RC%"=="0" goto done'
 		'chcp 65001 >nul'
@@ -786,10 +787,10 @@ function Write-Launcher {
 		':retry'
 		'rem the guard switched my_tools off and said so; give the line a moment before the window redraws'
 		'ping -n 4 127.0.0.1 >nul'
-		'"%MM_PI%" %*'
+		'call "%MM_PI%" %*'
 		'goto done'
 		':plain'
-		'"%MM_PI%" %*'
+		'call "%MM_PI%" %*'
 		':done'
 	)
 	$text = ($lines -join "`r`n") + "`r`n"

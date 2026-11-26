@@ -297,6 +297,22 @@ test("заявка: отправлена — в журнале «отправл�
 	assert.deepEqual(await wish.retryPending(w, { fetch: fakeFetch([], c2), root, now: new Date(day.getTime() + 60 * 3_600_000) }), { tried: 0, sent: 0 }, "ждущих нет");
 });
 
+test("замок согласия переживает перезапуск процесса и /reload, но черновик живёт полчаса", () => {
+	const dir = tmp("mm-gate-");
+	let t = 1_000_000;
+	const mk = () => new wish.ConsentGate(wish.fileGateStore("/work/Music", dir), () => t);
+	const g1 = mk();
+	g1.onUserInput("хочу мастеринг");
+	g1.setDraft("Заявка про мастеринг треков");
+	const g2 = mk(); // другой процесс pi (например -p на втором ходу)
+	assert.match((g2.approve() as any).reason, /ещё не ответил/);
+	g2.onUserInput("да");
+	assert.equal(mk().approve().ok, true, "«да» в новом процессе засчитано");
+	t += wish.DRAFT_TTL_MS + 1;
+	assert.match((mk().approve() as any).reason, /устарел/);
+	assert.notEqual(wish.fileGateStore("/work/Other", dir).load().seq, 3, "у другой рабочей папки свой замок");
+});
+
 // --- инструменты как их видит pi ---------------------------------------------------------------------------------
 
 function harness(ext: any, deps: object) {
@@ -312,18 +328,20 @@ test("wish_send: без согласия не шлёт ни разу; после
 	const w = ws();
 	const calls: any[] = [];
 	const plan: any[] = [{ status: 200 }];
-	const h = harness(wishExt, { fetch: fakeFetch(plan, calls), root: tmp("mm-root-"), version: "0.1.5" });
-	await h.emit("input", { text: "хочу, чтобы ты умел делать мастеринг", source: "interactive" });
+	const stateDir = tmp("mm-gate-");
+	const h = harness(wishExt, { fetch: fakeFetch(plan, calls), root: tmp("mm-root-"), version: "0.1.5", stateDir });
+	const ctxOf = { cwd: w };
+	await h.emit("input", { text: "хочу, чтобы ты умел делать мастеринг", source: "interactive" }, ctxOf);
 	await assert.rejects(h.call("wish_send", { action: "send" }, w), /нет черновика/);
 	const d = await h.call("wish_send", { action: "draft", text: "Ученик хочет мастеринг треков. Зачем: сводит дома. Пример: сделать громче без искажений." }, w);
 	assert.match(d.content[0].text, /ДОСЛОВНО/);
 	await assert.rejects(h.call("wish_send", { action: "send" }, w), /ещё не ответил/);
 	assert.equal(calls.length, 0);
-	await h.emit("input", { text: "нет, не надо", source: "interactive" });
+	await h.emit("input", { text: "нет, не надо", source: "interactive" }, ctxOf);
 	await assert.rejects(h.call("wish_send", { action: "send" }, w), /не согласился/);
 	assert.equal(calls.length, 0, "после отказа ничего не ушло");
 	await h.call("wish_send", { action: "draft", text: "Ученик хочет мастеринг треков. Зачем: сводит дома. Пример: сделать громче без искажений." }, w);
-	await h.emit("input", { text: "да", source: "interactive" });
+	await h.emit("input", { text: "да", source: "interactive" }, ctxOf);
 	const s = await h.call("wish_send", { action: "send", text: "ПОДМЕНА модели" }, w);
 	assert.match(s.content[0].text, /Отправил/);
 	assert.equal(calls.length, 1);
@@ -333,19 +351,19 @@ test("wish_send: без согласия не шлёт ни разу; после
 	// офлайн
 	plan.push({ throw: "ENOTFOUND" });
 	await h.call("wish_send", { action: "draft", text: "Ещё одна заявка: нужен разбор вокала по экспортированному wav-файлу." }, w);
-	await h.emit("input", { text: "ага", source: "interactive" });
+	await h.emit("input", { text: "ага", source: "interactive" }, ctxOf);
 	const o = await h.call("wish_send", { action: "send" }, w);
 	assert.match(o.content[0].text, /уйдёт при ближайшем запуске/);
 	assert.deepEqual(wish.readWishes(w).map((e) => e.status), [wish.SENT, wish.PENDING]);
 	// сообщения от самого расширения согласием не считаются
 	await h.call("wish_send", { action: "draft", text: "Третья заявка: хочется метроном с акцентами из агента." }, w);
-	await h.emit("input", { text: "да", source: "extension" });
+	await h.emit("input", { text: "да", source: "extension" }, ctxOf);
 	await assert.rejects(h.call("wish_send", { action: "send" }, w), /ещё не ответил/);
 });
 
 test("wish_send: короткий и длинный текст отклоняются; ничего личного в запросе нет", async () => {
 	const w = ws();
-	const h = harness(wishExt, { fetch: fakeFetch([]), root: tmp("mm-root-") });
+	const h = harness(wishExt, { fetch: fakeFetch([]), root: tmp("mm-root-"), stateDir: tmp("mm-gate-") });
 	await assert.rejects(h.call("wish_send", { action: "draft", text: "ку" }, w), /короткий/);
 	await assert.rejects(h.call("wish_send", { action: "draft", text: "я".repeat(2000) }, w), /длиннее/);
 	await assert.rejects(h.call("wish_send", { action: "wat" }, w), /draft, send или cancel/);
@@ -356,7 +374,7 @@ test("старт сессии: ожидающая заявка уходит са
 	const root = tmp("mm-root-");
 	await wish.submitWish(w, "Заявка, которая не ушла из-за сети: нужен разбор вокала.", { fetch: fakeFetch([{ throw: "нет сети" }]) });
 	const calls: any[] = [];
-	const h = harness(wishExt, { fetch: fakeFetch([{ status: 200 }], calls), root });
+	const h = harness(wishExt, { fetch: fakeFetch([{ status: 200 }], calls), root, stateDir: tmp("mm-gate-") });
 	await h.emit("session_start", {}, { cwd: w });
 	await new Promise((r) => setTimeout(r, 50));
 	assert.equal(calls.length, 1);

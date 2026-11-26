@@ -110,7 +110,8 @@ export function probePi(opts: ProbeOptions = {}): Promise<ProbeResult> {
 		let done = false;
 		const quote = (s: string) => (/[\s"]/.test(s) ? `"${s}"` : s);
 		const child = cmd.shell
-			? spawn(quote(cmd.file), args.map(quote), { cwd: opts.cwd, env: opts.env ?? process.env, shell: true, windowsHide: true })
+			// одна командная строка без массива аргументов: иначе node 22+ печатает DEP0190 прямо в окно агента
+			? spawn([quote(cmd.file), ...args.map(quote)].join(" "), { cwd: opts.cwd, env: opts.env ?? process.env, shell: true, windowsHide: true })
 			: spawn(cmd.file, args, { cwd: opts.cwd, env: opts.env ?? process.env, windowsHide: true });
 		const finish = (code: number | null) => {
 			if (done) return;

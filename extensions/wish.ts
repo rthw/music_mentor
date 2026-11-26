@@ -13,10 +13,12 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { quietRender } from "../lib/mm/quiet.ts";
-import { ConsentGate, proto, retryPending, submitWish, wishesFile, type PostDeps } from "../lib/mm/wish.ts";
+import { ConsentGate, fileGateStore, proto, retryPending, submitWish, wishesFile, type PostDeps } from "../lib/mm/wish.ts";
 
 export interface WishDeps extends PostDeps {
 	root?: string;
+	/** Где хранить состояние замка согласия (в тестах — своя папка); по умолчанию системный временный каталог. */
+	stateDir?: string;
 }
 
 function appVersion(): string {
@@ -32,13 +34,18 @@ function text(t: string, details: object = {}) {
 }
 
 export default function (pi: ExtensionAPI, deps: WishDeps = {}) {
-	const gate = new ConsentGate();
+	const gates = new Map<string, ConsentGate>();
+	const gateFor = (cwd: string): ConsentGate => {
+		let g = gates.get(cwd);
+		if (!g) gates.set(cwd, (g = new ConsentGate(fileGateStore(cwd, deps.stateDir))));
+		return g;
+	};
 	const post = (): PostDeps => ({ ...deps, version: deps.version ?? appVersion() });
 
 	// Каждое сообщение ученика двигает счётчик; сообщения, которые агент сам себе отправил, не считаем.
-	pi.on("input", (event: any) => {
+	pi.on("input", (event: any, ctx: any) => {
 		if (event?.source === "extension") return;
-		gate.onUserInput(String(event?.text ?? ""));
+		gateFor(ctx.cwd).onUserInput(String(event?.text ?? ""));
 	});
 
 	// Ожидающие заявки уходят при старте сессии, не чаще раза в сутки; молча.
@@ -50,7 +57,7 @@ export default function (pi: ExtensionAPI, deps: WishDeps = {}) {
 		name: "wish_send",
 		label: "Заявка автору",
 		description:
-			"Передать заявку автору агента, когда ученику не хватает умения, которое не решается рецептом (recipe_save) или маленькой своей функцией (my_tools_save). Сначала action=draft с текстом заявки (что хочет ученик, зачем, пример): инструмент вернёт текст, который ты показываешь ученику дословно и спрашиваешь «отправить Максу?». Только если его следующее сообщение — «да», вызывай action=send (отправится именно показанный текст). Без согласия отправить нельзя. Одна заявка на тему, не спамь; личные данные и файлы его проектов в заявку не клади без его явного согласия на каждый пункт.",
+			"Передать заявку автору агента, когда ученику не хватает умения, которое не решается рецептом (recipe_save) или маленькой своей функцией (my_tools_save). Сначала action=draft с текстом заявки (что хочет ученик, зачем, пример): инструмент вернёт текст, который ты показываешь ученику дословно и спрашиваешь «отправить Максу?». Только если его следующее сообщение — «да», вызывай action=send (отправится именно показанный текст). Без согласия отправить нельзя. Одна заявка на тему, не спамь; имя ученика в заявку не пиши (только «ученик»), личные данные и файлы его проектов — только с его явного согласия на каждый пункт.",
 		promptSnippet: "Заявка автору в Telegram: draft → показать ученику → после «да» send",
 		parameters: Type.Object({
 			action: Type.String({ description: "draft | send | cancel" }),
@@ -61,6 +68,7 @@ export default function (pi: ExtensionAPI, deps: WishDeps = {}) {
 			(r) => String(r?.details?.summary ?? "готово"),
 		),
 		async execute(_id, p: { action: string; text?: string }, _s, _u, ctx) {
+			const gate = gateFor(ctx.cwd);
 			if (p.action === "draft") {
 				const t = String(p.text ?? "").trim();
 				if (t.length < proto.minTextChars) throw new Error(`текст заявки короткий (меньше ${proto.minTextChars} знаков): опиши, что нужно и зачем`);

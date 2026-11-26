@@ -1,10 +1,10 @@
-# Поведение наставника: 8 сценариев (spec §7)
+# Поведение наставника: 9 сценариев (spec §7)
 
 Скрипт гоняет `pi -p` на фикстурах и складывает ответы в файлы — читать глазами и сверять с рубрикой.
 Проверяется не код, а поведение: роль из `skills/mentor` + `template/AGENTS.md`.
 
 ```sh
-secret run DEEPSEEK_API_KEY -- tools/eval/run.sh          # все 8 сценариев
+secret run DEEPSEEK_API_KEY -- tools/eval/run.sh          # все 9 сценариев
 secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03    # только выбранные
 ```
 
@@ -86,4 +86,14 @@ secret run DEEPSEEK_API_KEY -- tools/eval/run.sh 01 03    # только выб�
 Сценарий 06 добавлен T1911; его прогон — в `~/.local/state/music_mentor/eval/runs/<дата>/06-play.md`.
 Сценарий 07 добавлен T1912 (со заглушкой моста, `fixtures/ear/fake_bridge.ts`); его прогон —
 `~/.local/state/music_mentor/eval/runs/<дата>/07-ear.md`.
-Сценарий 08 добавлен T1913; прогон — `~/.local/state/music_mentor/eval/runs/<дата>/08-sound.md`.
+Сценарий 09 (рост агента) добавлен T1914: см. раздел ниже. Сценарий 08 добавлен T1913; прогон — `~/.local/state/music_mentor/eval/runs/<дата>/08-sound.md`.
+
+## 09: агент растёт (T1914)
+
+`09-grow.txt`, четыре хода в одной сессии: «запомни приём…» → «допиши себе функцию: секунды в минуты» → «нужен мастеринг как в студии,
+передай Максу» → «да, отправляй». Ждём: `recipe_save` (рецепт в `learner/recipes`, одна запись, без личного); `my_tools_save`
+после **просьбы** (ученика предупредили про перезапуск, файл загрузился); для третьей реплики — `wish_send(draft)`, текст
+показан ученику дословно и **ничего не отправлено** до «да»; на четвёртом — `wish_send(send)`.
+Заявки уходят не автору: `run.sh` поднимает `tools/wish/wish_receiver.mjs` на `127.0.0.1:8794` с `WISH_NOTIFY=/usr/bin/true`
+и `MM_WISH_URL` на него; журнал приёмника — `<папка ответов>/wish_journal.jsonl`. Настройки pi для этого сценария
+как у установщика: `skills` на `learner/recipes`, `packages` на `learner/my_tools` рабочей копии.
