@@ -46,18 +46,23 @@ Ableton Live 10/11/12 + Remote Script MentorBridge (Python 2.7 и 3 одним �
 
 ```
 install.ps1                 установщик (UTF-8 без BOM: иначе ломается irm | iex), идемпотентный
+update.ps1 change_key.ps1   обновление и смена ключа (запускаются с диска — с BOM, с -ExecutionPolicy Bypass)
+lib/win/common.ps1          общие функции установщика (BOM): шаги, версии, журнал, шаблон, мост
+lib/win/versions.json       единственное место версий: tag релиза, pi, минимальный node
 package.json                pi-package (как pi_home): extensions + skills
 extensions/
   als.ts                    project_list, project_summary, clip_notes, project_analysis, project_diff
   live.ts                   клиент моста: live_ping, live_state, live_clip_notes, live_add_*, live_browser
-  session_start.ts          проактивный старт: свежие проекты, профиль, баланс ключа, обновление
+  update.ts                 mentor_update + session_start: новая версия и баланс ключа, не чаще раза в сутки
+  log.ts                    mentor_log: последний журнал установки/обновления, путь и хвост
   web.ts guard.ts ask.ts    из pi_home (копия со ссылкой на источник)
+lib/mm/session.ts           отметки «раз в сутки» и корень данных наставника
 lib/music/                  детерминированный анализ нот (TS, с тестами)
 bridge/MentorBridge/        Remote Script
 knowledge/                  curriculum.yaml, cards/, ableton/, INDEX.md
 skills/                     mentor/ theory/ ableton/ project/
 template/                   рабочая папка ученика
-tools/                      только у автора: distill/ (пайплайн выжимки), invite.sh
+tools/                      только у автора: release.sh, invite.sh, distill/ (пайплайн выжимки)
 tests/ fixtures/als/{10,11,12}/
 ```
 
@@ -78,15 +83,22 @@ $env:MM_KEY='<ключ>'; irm https://raw.githubusercontent.com/rthw/music_mento
 2. Git for Windows (pi нужен Git Bash): `winget install Git.Git -e --silent`. Нет winget или он
    упал — свежий установщик по API релизов `git-for-windows/git`, файл ищется **по шаблону**
    (`Git-*-64-bit.exe`), а не по имени.
-3. pi: способ выбрать по факту на чистой Windows (winget `EarendilWorks.pi` или Node LTS через winget +
-   `npm install -g --ignore-scripts @earendil-works/pi-coding-agent@<версия>`), версию pi закрепить.
+3. Node и pi по версиям из `lib/win/versions.json` (файл скачивается с того же тега, что и код):
+   Node нужного major или новее — иначе ставится LTS с nodejs.org; pi ставится
+   `npm install -g --ignore-scripts @earendil-works/pi-coding-agent@<версия из файла>` в
+   `%LOCALAPPDATA%\music_mentor\npm`. Версия совпала — шаг ничего не делает. Одна функция
+   `Ensure-MmPiRuntime` на установку и обновление, второй копии команды в скриптах нет.
 4. Код music_mentor: `git clone --depth 1 --branch <тег>` в `%LOCALAPPDATA%\music_mentor\app`,
    затем `pi install` этого пути. GitHub-аккаунт не нужен.
 5. `settings.json` pi: provider deepseek, модель по умолчанию `deepseek-v4-pro` (запросов мало, важнее
    качество; flash остаётся в списке), `quietStartup`, `shellPath` при необходимости, Shift+Enter
    в Windows Terminal (pi docs: terminal-setup).
 6. Ключ (§2) → `%USERPROFILE%\.pi\agent\auth.json`. Сразу проверка запросом баланса.
-7. Рабочая папка `Documents\music_mentor` из `template/`. Если она уже есть, не перезаписывать.
+7. Рабочая папка `Documents\music_mentor` из `template/`. Файлы делятся по владельцу (список в
+   `Get-MmLearnerDirs`, `lib/win/common.ps1`): `learner/` и `notes/` — ученика, только создаются и
+   никогда не перезаписываются; всё остальное (`AGENTS.md`, будущие `skills/`) — наставника,
+   перезаписывается при каждом обновлении, чтобы новая роль доходила без переустановки. Одинаковые
+   файлы не трогаются, поэтому повторный запуск — «актуальна».
 8. MentorBridge (§4) в каждую найденную установку Live.
 9. Ярлыки: «Музыкальный наставник» (`wt.exe -d <папка> pi`; нет Windows Terminal — окно PowerShell),
    «Сменить ключ DeepSeek», «Обновить наставника».
@@ -96,7 +108,14 @@ $env:MM_KEY='<ключ>'; irm https://raw.githubusercontent.com/rthw/music_mento
 
 Правила (из истории pi_home, обязательны):
 - **Ни одного молчаливого выхода.** Каждый шаг в `try/catch`. При ошибке — «Шаг N (<имя>) не
-  получился: <текст>. Сфотографируй это окно и пришли <автору>». Никакого `exit` без сообщения.
+  получился: <текст>» и дальше `Get-MmLogHint`: «Журнал: <путь>. Он уже в буфере обмена — пришли этот
+  файл автору» (`Set-Clipboard -Path`; не вышло — путь текстом). Никакого `exit` без сообщения и
+  никаких «сфотографируй окно»: модель ученика картинок не видит.
+- **Журнал.** `install.ps1`, `update.ps1`, `change_key.ps1` пишут в
+  `%LOCALAPPDATA%\music_mentor\logs\<скрипт>_<дата-время>.log` всё, что видно в окне, номер шага и
+  текст исключения; хранятся последние 10. Ключ DeepSeek в журнал не попадает никогда (значения с
+  `sk-…` и `Bearer …` заменяются маской; проверено тестом с фиктивным ключом). Читать журнал умеет сам
+  наставник: тул `mentor_log` (путь и хвост ~100 строк), поэтому ученик присылает не скриншот, а файл.
 - Не прописывать жёстко имена файлов релизов: пакетный менеджер, иначе поиск по шаблону и
   архитектуре с понятной ошибкой.
 - Лишних зависимостей нет: GitHub CLI, вход в GitHub, Python и админ-права не нужны. Права
@@ -107,7 +126,15 @@ $env:MM_KEY='<ключ>'; irm https://raw.githubusercontent.com/rthw/music_mento
 - Готовность — **полный прогон на чистой Windows 10 и 11**, а не проверка одной строки.
 
 Обновление: ярлык или инструмент `mentor_update` → `git fetch --tags`, checkout последнего тега,
-`pi install`. `session_start` раз в день проверяет новый тег и говорит о нём одной строкой.
+затем по порядку: Node и pi догоняют `lib/win/versions.json` (с диска, после checkout), `pi install`,
+шаблон рабочей папки (правило владельца из шага 7), мост. Ошибка на любом шаге — журнал и путь к нему.
+`session_start` раз в сутки (отметка `%LOCALAPPDATA%\music_mentor\last_update_check.txt`, фоном, без
+сети — молча) проверяет новый тег и говорит о нём одной строкой; ставит только по просьбе ученика.
+
+Выпуск версии у автора — одна команда `tools/release.sh <X.Y.Z>`: проверяет чистоту дерева и ветку,
+гоняет `npm test`, пишет тег в `lib/win/versions.json`, bootstrap-тег в `install.ps1` и `version` в
+`package.json`, коммитит, ставит тег и пушит. Без `--yes` — только план. Итоговый тег выпускает тот,
+кто принял прогон на чистой Windows.
 
 ## 2. Ключ DeepSeek
 
@@ -119,9 +146,13 @@ $env:MM_KEY='<ключ>'; irm https://raw.githubusercontent.com/rthw/music_mento
 - Без `MM_KEY` установщик сам просит вставить ключ (ввод скрыт).
 - Замена: ярлык «Сменить ключ DeepSeek» → `change_key.ps1`: вставить → проверка балансом → запись
   в `auth.json`. Работает и `/login` в pi, но другу про него знать не нужно.
-- Баланс: `session_start` проверяет `GET https://api.deepseek.com/user/balance`. Мало денег —
-  предупреждение. Ошибка 402 (баланс кончился) — понятная фраза «деньги на ключе закончились, напиши
-  <автору>» вместо стека ошибки.
+- Баланс: `session_start` раз в сутки (отметка `last_balance_check.txt`) спрашивает
+  `GET https://api.deepseek.com/user/balance`, ключ читает из `auth.json` pi (провайдер `deepseek`,
+  поле `key`) и никуда не печатает. Меньше порога (`BALANCE_MIN`, ~1 USD / 7 CNY) — одна строка
+  «осталось X, скоро закончится — напиши автору». Нет сети или ключа — молча пропустить.
+  Ошибка 402 (баланс кончился) — понятная фраза «деньги на ключе закончились, напиши <автору>» вместо
+  стека ошибки (проверка ключа при установке и `change_key.ps1`).
+- Журнал смены ключа: `change_key.ps1` пишет то же, что установщик, и в конце ошибки даёт путь к файлу.
 
 ## 3. Чтение проекта: `extensions/als.ts` + `lib/music`
 
@@ -316,3 +347,9 @@ search/page` → модель пишет карточку → проверки. 
   `@earendil-works/pi-coding-agent@1.5.0` в `%LOCALAPPDATA%\music_mentor\npm` (версия закреплена); winget-вариант `EarendilWorks.pi` не использован.
   Shift+Enter в Windows Terminal: pi сам распознаёт Shift на Windows, настройки терминала не трогаем.
 - 2026-11-10 (T1613): §1 приведён к факту: `install.ps1` без BOM; `.ps1` с диска запускаются с `-ExecutionPolicy Bypass` (на чистой Win11 политика `Restricted`).
+- 2026-11-26 (T1906): поставка без автора — обновление обновляет рабочую папку (файлы наставника
+  перезаписываются, `learner/` и `notes/` только создаются, список в `Get-MmLearnerDirs`); версии
+  (тег, pi, минимальный node) живут в одном файле `lib/win/versions.json`, установка читает его по сети
+  с того же тега, обновление — с диска; журнал вместо фотографии окна (+ тул `mentor_log`, хранятся 10
+  файлов, ключ под маской); `session_start` раз в сутки говорит о новой версии и о низком балансе;
+  выпуск — `tools/release.sh`.
