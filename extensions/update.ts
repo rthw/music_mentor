@@ -1,6 +1,6 @@
 /**
- * mentor_update — обновление наставника: git fetch --tags, checkout последнего стабильного тега, pi install,
- * переустановка моста. Вся работа в update.ps1 (тот же скрипт, что и у ярлыка «Обновить наставника»).
+ * mentor_update — обновление агента: git fetch --tags, checkout последнего стабильного тега, pi install,
+ * переустановка моста. Вся работа в update.ps1 (тот же скрипт, что и у ярлыка «Обновить агента»).
  * check_only=true только сравнивает текущий и последний теги и ничего не меняет.
  *
  * Тут же две тихие проверки — не чаще раза в сутки (см. lib/mm/session.ts): вышла ли новая версия
@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { Type } from "typebox";
 import { markRun, mmRoot, shouldRunDaily, stampPath } from "../lib/mm/session.ts";
+import { quietRender } from "../lib/mm/quiet.ts";
 
 const APP_DIR = path.join(import.meta.dirname, "..");
 const STABLE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
@@ -78,7 +79,7 @@ export async function updateReminder(deps: DailyDeps = {}): Promise<string | und
 	try {
 		const { current, latest } = await (deps.latest ?? (() => remoteLatest()))();
 		if (!latest || current === latest) return undefined;
-		return `Вышла новая версия наставника ${latest} (у тебя ${current ?? "неизвестная"}). Скажи «обнови наставника», когда будет удобно.`;
+		return `Вышла новая версия агента ${latest} (у тебя ${current ?? "неизвестная"}). Скажи «обнови агента», когда будет удобно.`;
 	} catch {
 		return undefined;
 	}
@@ -139,22 +140,31 @@ export async function remoteLatest(dir = APP_DIR): Promise<{ current?: string; l
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "mentor_update",
-		label: "Обновить наставника",
+		label: "Обновить агента",
 		description:
-			"Проверить и поставить новую версию наставника (код, мост к Live). check_only=true — только сказать, есть ли новая версия. После обновления нужно перезапустить наставника. Обновляй только по просьбе ученика.",
-		promptSnippet: "Проверить или поставить новую версию наставника",
+			"Проверить и поставить новую версию агента (код, мост к Live). check_only=true — только сказать, есть ли новая версия. После обновления нужно перезапустить агента. Обновляй только по просьбе ученика.",
+		promptSnippet: "Проверить или поставить новую версию агента",
 		parameters: Type.Object({
 			check_only: Type.Optional(Type.Boolean({ description: "Только проверить, ничего не менять" })),
 		}),
+		...quietRender(
+			() => "Смотрю, нет ли новой версии…",
+			(r) => {
+				const d = r?.details ?? {};
+				if (!d.latest) return "на сервере нет стабильных версий";
+				if (d.current === d.latest) return `уже последняя версия (${d.latest})`;
+				return d.updated ? `обновил до ${d.latest}` : `есть новая версия: ${d.latest}`;
+			},
+		),
 		async execute(_id: string, params: { check_only?: boolean }) {
 			const { current, latest } = await remoteLatest();
-			if (!latest) return text("На сервере нет стабильных версий наставника.", { current });
+			if (!latest) return text("На сервере нет стабильных версий агента.", { current });
 			if (current === latest) return text(`Установлена последняя версия (${latest}).`, { current, latest });
 			if (params?.check_only) return text(`Есть новая версия: ${latest} (сейчас ${current ?? "неизвестно"}). Скажи ученику, что можно обновиться.`, { current, latest });
 			if (process.platform !== "win32") throw new Error("Обновление через update.ps1 работает только в Windows.");
 			const r = await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(APP_DIR, "update.ps1"), "-NoPause"], APP_DIR, 300_000);
 			if (r.code !== 0) throw new Error(`Обновление не получилось: ${r.out.slice(-1500)}`);
-			return text(`Обновление до ${latest} выполнено. Попроси ученика закрыть наставника и открыть заново.\n${r.out.slice(-800)}`, { current, latest });
+			return text(`Обновление до ${latest} выполнено. Попроси ученика закрыть агента и открыть заново.\n${r.out.slice(-800)}`, { current, latest, updated: true });
 		},
 	});
 }

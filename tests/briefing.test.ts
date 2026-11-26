@@ -5,21 +5,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./stubs/packages.ts";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-try {
-	await import("typebox");
-} catch {
-	registerHooks({
-		resolve(specifier, context, next) {
-			if (specifier === "typebox") return { url: new URL("./stubs/typebox.ts", import.meta.url).href, shortCircuit: true };
-			return next(specifier, context);
-		},
-	});
-}
 
 const br = await import("../lib/mm/briefing.ts");
 const start = await import("../extensions/session_start.ts");

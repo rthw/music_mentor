@@ -1,21 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./stubs/packages.ts";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-try {
-	await import("typebox");
-} catch {
-	registerHooks({
-		resolve(specifier, context, next) {
-			if (specifier === "typebox") return { url: new URL("./stubs/typebox.ts", import.meta.url).href, shortCircuit: true };
-			return next(specifier, context);
-		},
-	});
-}
 const live = await import("../extensions/live.ts");
 
 /** Фейковый мост: отвечает по таблице, запоминает запросы. */

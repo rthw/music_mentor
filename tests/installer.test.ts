@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./stubs/packages.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
@@ -175,16 +175,6 @@ test("tools/invite.sh: без секрета — подсказка, со зна
 	assert.ok(readFileSync(clip, "utf8").includes("music_mentor/v7.7.7/install.ps1"));
 });
 
-try {
-	await import("typebox");
-} catch {
-	registerHooks({
-		resolve(specifier, context, next) {
-			if (specifier === "typebox") return { url: new URL("./stubs/typebox.ts", import.meta.url).href, shortCircuit: true };
-			return next(specifier, context);
-		},
-	});
-}
 const upd = await import("../extensions/update.ts");
 
 test("mentor_update: последний стабильный тег (числовое сравнение, rc игнорируются)", () => {

@@ -15,6 +15,7 @@ import net from "node:net";
 import path from "node:path";
 import { Type } from "typebox";
 import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
+import { plural, quietRender } from "../lib/mm/quiet.ts";
 
 export const DEFAULT_PORT = 9878;
 const TIMEOUT_MS = 35_000;
@@ -67,7 +68,7 @@ function liveRunning(): Promise<boolean | undefined> {
 export function enableSteps(): string {
 	return [
 		"Окно Live должно быть открыто, а мост выключен. Включить его надо один раз:",
-		"1. Открой настройки Live: Options → Preferences (на Windows Ctrl+запятая).",
+		"1. Открой настройки Live: Options → Settings… (на Windows Ctrl+запятая). В старых версиях этот пункт называется Preferences…",
 		"2. Вкладка: в Live 11 и в Live 12 до 12.3 — «Link, Tempo & MIDI» (иногда «Link/Tempo/MIDI»); в новых Live 12 (проверено на 12.4) она называется «Tempo & MIDI», рядом отдельная «Link»; в Live 10 — «Link MIDI».",
 		"3. В блоке Control Surface выбери в свободной строке MentorBridge. Input и Output оставь None.",
 		"4. Закрой настройки и скажи мне — я проверю связь.",
@@ -147,6 +148,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Проверить связь с запущенным Ableton Live через мост MentorBridge и узнать версию Live и моста. Если моста нет — вернёт шаги включения.",
 		promptSnippet: "Проверить связь с Live, узнать версию",
 		parameters: Type.Object({}),
+		...quietRender(
+			() => "Связываюсь с Live…",
+			(r) => `Live ${r?.details?.live ?? "?"}, мост на связи`,
+		),
 		async execute() {
 			const r = await call({ cmd: "ping" }, addr());
 			return text(`Связь есть. Ableton Live ${r.live ?? "?"}, мост ${r.bridge} v${r.version} (Python ${r.python}).`, r);
@@ -159,6 +164,14 @@ export default function (pi: ExtensionAPI) {
 		description: "Что сейчас в запущенном Live: темп, размер, play, выбранные трек и сцена, все треки с устройствами и клипами в слотах (имя, длина, число нот). Arrangement в Live 10 не отдаётся — его читай из .als.",
 		promptSnippet: "Состояние запущенного Live: треки, устройства, клипы",
 		parameters: Type.Object({}),
+		...quietRender(
+			() => "Смотрю, что сейчас в Live…",
+			(r) => {
+				const song = r?.details?.song ?? {};
+				const n = r?.details?.tracks?.length ?? 0;
+				return `${plural(n, "трек", "трека", "треков")}, ${song.tempo ?? "?"} BPM, ${song.is_playing ? "играет" : "стоит"}`;
+			},
+		),
 		async execute() {
 			const [song, tracks] = await Promise.all([call({ cmd: "song" }, addr()), call({ cmd: "tracks" }, addr())]);
 			const lines = [`Темп ${song.tempo}, размер ${song.signature.join("/")}, ${song.is_playing ? "играет" : "стоит"}; треков ${song.track_count}, сцен ${song.scene_count}.`];
@@ -178,6 +191,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Ноты MIDI-клипа в запущенном Live (то, что ученик видит прямо сейчас, даже несохранённое).",
 		promptSnippet: "Ноты клипа из запущенного Live",
 		parameters: Type.Object({ track: trackRef, slot: Type.Number({ description: "Номер слота (сцены), с 0" }) }),
+		...quietRender(
+			() => "Читаю ноты клипа в Live…",
+			(r) => (r?.details?.exists === false ? "в этом слоте нет клипа" : plural(r?.details?.notes?.length ?? 0, "нота", "ноты", "нот")),
+		),
 		async execute(_id, p) {
 			const r = await call({ cmd: "clip_notes", track: p.track, slot: p.slot }, addr());
 			if (!r.exists) return text("В этом слоте нет клипа.", r);
@@ -192,6 +209,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Какие инструменты, эффекты и пресеты есть в Live ученика (в его редакции). Без path — разделы; с path вида 'instruments' или 'instruments/Wavetable' — содержимое. Перед live_load_device смотри сюда, а не угадывай.",
 		promptSnippet: "Что есть в браузере Live ученика (его редакция)",
 		parameters: Type.Object({ path: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) }),
+		...quietRender(
+			(a) => (a?.path ? `Смотрю браузер Live: ${a.path}…` : "Смотрю браузер Live…"),
+			(r) => (r?.details?.roots ? "разделы браузера Live" : `${r?.details?.total ?? 0} элементов`),
+		),
 		async execute(_id, p) {
 			const r = await call({ cmd: "browser", path: p.path, limit: p.limit }, addr());
 			if (r.roots) return text("Разделы: " + r.roots.join(", "), r);
@@ -206,6 +227,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Добавить в Live новый MIDI-трек «Подсказка: <имя>» фиксированного цвета. Трек ученика не трогает.",
 		promptSnippet: "Добавить MIDI-трек «Подсказка: …» в Live",
 		parameters: Type.Object({ name: Type.String({ description: "Имя без префикса «Подсказка: »" }) }),
+		...quietRender(
+			(a) => `Добавляю трек-подсказку «${a?.name ?? ""}»…`,
+			(r) => `трек «${r?.details?.name ?? "Подсказка"}» добавлен`,
+		),
 		async execute(_id, p, _s, _u, ctx) {
 			const pre = await beforeWrite(ctx.cwd);
 			const r = await call({ cmd: "add_midi_track", name: p.name }, addr());
@@ -227,6 +252,13 @@ export default function (pi: ExtensionAPI) {
 			notes: Type.Array(Type.Object({ pitch: Type.Number(), start: Type.Number(), duration: Type.Number(), velocity: Type.Optional(Type.Number()) })),
 			name: Type.String({ description: "Имя без префикса" }),
 		}),
+		...quietRender(
+			(a) => `Кладу подсказку в Live: «${a?.name ?? ""}»…`,
+			(r) => {
+				const d = r?.details ?? {};
+				return `клип «${d.name ?? "Подсказка"}»: ${plural(d.note_count ?? 0, "нота", "ноты", "нот")}, слот ${d.slot ?? "?"}`;
+			},
+		),
 		async execute(_id, p, _s, _u, ctx) {
 			const pre = await beforeWrite(ctx.cwd);
 			const r = await call({ cmd: "add_clip", ...p }, addr());
@@ -240,6 +272,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Загрузить инструмент или эффект на ТРЕК-ПОДСКАЗКУ по пути из live_browser (например instruments/Wavetable). На треки ученика мост устройства не грузит.",
 		promptSnippet: "Загрузить инструмент/эффект на трек-подсказку",
 		parameters: Type.Object({ track: trackRef, path: Type.String({ description: "Путь из live_browser" }) }),
+		...quietRender(
+			(a) => `Загружаю ${String(a?.path ?? "устройство").replace(/^instruments\//, "")} в Live…`,
+			(r) => `${r?.details?.loaded ?? "устройство"} на треке ${r?.details?.track ?? "?"}`,
+		),
 		async execute(_id, p, _s, _u, ctx) {
 			const pre = await beforeWrite(ctx.cwd);
 			const r = await call({ cmd: "load_device", ...p }, addr());
@@ -253,6 +289,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Выставить параметр устройства на ТРЕКЕ-ПОДСКАЗКЕ (значение числом или строкой, как её показывает Live: «1/8», «50 %»). Устройства ученика мост не меняет.",
 		promptSnippet: "Параметр устройства на треке-подсказке",
 		parameters: Type.Object({ track: trackRef, device: Type.Union([Type.Number(), Type.String()]), param: Type.String(), value: Type.Union([Type.Number(), Type.String()]) }),
+		...quietRender(
+			(a) => `Кручу ${a?.param ?? "параметр"} в Live…`,
+			(r) => `${r?.details?.device ?? ""}: ${r?.details?.param ?? ""} = ${r?.details?.display ?? "?"}`,
+		),
 		async execute(_id, p, _s, _u, ctx) {
 			const pre = await beforeWrite(ctx.cwd);
 			const r = await call({ cmd: "set_param", ...p }, addr());
@@ -266,6 +306,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Удалить трек-подсказку. Только после явного «да» ученика в чате: сначала спроси, потом вызывай с confirmed=true. Треки ученика удалить нельзя.",
 		promptSnippet: "Удалить трек-подсказку (после «да» ученика)",
 		parameters: Type.Object({ track: trackRef, confirmed: Type.Boolean({ description: "true только если ученик в чате сказал «да»" }) }),
+		...quietRender(
+			() => "Убираю трек-подсказку в Live…",
+			(r) => `трек «${r?.details?.removed ?? "?"}» убран`,
+		),
 		async execute(_id, p, _s, _u, ctx) {
 			const pre = await beforeWrite(ctx.cwd);
 			const r = await call({ cmd: "remove", ...p }, addr());
@@ -279,6 +323,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Запустить клип в слоте. Только по просьбе ученика.",
 		promptSnippet: "Запустить клип в Live (только по просьбе)",
 		parameters: Type.Object({ track: trackRef, slot: Type.Number() }),
+		...quietRender(
+			() => "Запускаю клип в Live…",
+			(r) => `играет: трек ${r?.details?.track ?? "?"}, слот ${r?.details?.slot ?? "?"}`,
+		),
 		async execute(_id, p) {
 			const r = await call({ cmd: "fire_clip", ...p }, addr());
 			return text(`Запущен клип: трек ${r.track}, слот ${r.slot}.`, r);
@@ -291,6 +339,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Остановить воспроизведение и все клипы.",
 		promptSnippet: "Остановить воспроизведение в Live",
 		parameters: Type.Object({}),
+		...quietRender(
+			() => "Останавливаю Live…",
+			() => "остановлено",
+		),
 		async execute() {
 			await call({ cmd: "stop" }, addr());
 			return text("Остановлено.");

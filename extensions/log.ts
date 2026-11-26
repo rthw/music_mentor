@@ -1,20 +1,21 @@
 /**
  * mentor_log — последний журнал установки, обновления или смены ключа.
  *
- * Журналы пишут install.ps1 / update.ps1 / change_key.ps1 в logs\ данных наставника
+ * Журналы пишут install.ps1 / update.ps1 / change_key.ps1 в logs\ данных агента
  * (см. lib/win/common.ps1, Start-MmLog). Ученик присылает автору файл, а не фотографию окна,
- * поэтому наставник должен уметь показать хвост журнала прямо в разговоре.
+ * поэтому агент должен уметь показать хвост журнала прямо в разговоре.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { quietRender } from "../lib/mm/quiet.ts";
 import { Type } from "typebox";
 import { mmRoot } from "../lib/mm/session.ts";
 
 export const TAIL_LINES = 100;
 
-/** Каталог журналов: <данные наставника>\logs. */
+/** Каталог журналов: <данные агента>\logs. */
 export function logsDir(root = mmRoot()): string {
 	return path.join(root, "logs");
 }
@@ -47,18 +48,27 @@ export function tail(text: string, n = TAIL_LINES): string[] {
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "mentor_log",
-		label: "Журнал наставника",
+		label: "Журнал агента",
 		description:
 			"Показать последний журнал установки, обновления или смены ключа и его путь. Вызывай, когда ученик присылает скриншот ошибки или говорит, что установка/обновление не прошли: попроси прислать этот файл в разговор до слов «ничего не работает».",
 		promptSnippet: "Последний журнал установки/обновления и путь к файлу",
 		parameters: Type.Object({
 			lines: Type.Optional(Type.Number({ description: "Сколько последних строк показать (по умолчанию 100)" })),
 		}),
+		...quietRender(
+			() => "Открываю журнал…",
+			(r) => {
+				const file = r?.details?.file;
+				if (!file) return "журналов пока нет";
+				const n = r?.details?.lines ?? TAIL_LINES;
+				return `${n} строк из ${path.basename(String(file))}`;
+			},
+		),
 		async execute(_id: string, params: { lines?: number }) {
 			const n = Math.min(Math.max(Math.floor(Number(params?.lines) || TAIL_LINES), 1), 1000);
 			const file = latestLog();
 			if (!file) {
-				return { content: [{ type: "text" as const, text: `Журналов пока нет (${logsDir()}). Значит установка без ошибок ещё не запускалась после обновления наставника.` }], details: { dir: logsDir() } };
+				return { content: [{ type: "text" as const, text: `Журналов пока нет (${logsDir()}). Значит установка без ошибок ещё не запускалась после обновления агента.` }], details: { dir: logsDir() } };
 			}
 			let body: string;
 			try {

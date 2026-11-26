@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./stubs/packages.ts";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -389,17 +389,6 @@ test("project_diff: изменения нот, темпа, устройств, �
 /* ---------- расширение pi ---------- */
 
 test("extensions/als.ts регистрирует пять инструментов и они работают на фикстуре 12", async () => {
-	try {
-		import.meta.resolve("typebox");
-	} catch {
-		// typebox ставит сам pi; в тестах без установки подменяем заглушкой
-		registerHooks({
-			resolve(specifier, context, next) {
-				if (specifier === "typebox") return { url: new URL("./stubs/typebox.ts", import.meta.url).href, shortCircuit: true };
-				return next(specifier, context);
-			},
-		});
-	}
 	const mod = await import("../extensions/als.ts");
 	const tools = new Map<string, any>();
 	mod.default({ registerTool: (t: any) => tools.set(t.name, t) } as any);

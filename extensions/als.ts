@@ -16,6 +16,7 @@ import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.
 import { findClip, findTrack, clipNotesText } from "../lib/als/notes.ts";
 import { readProject } from "../lib/als/parse.ts";
 import { summarize } from "../lib/als/summary.ts";
+import { headLine, plural, projectName, quietRender } from "../lib/mm/quiet.ts";
 
 function text(t: string, details: object = {}) {
 	return { content: [{ type: "text" as const, text: t }], details };
@@ -42,6 +43,13 @@ export default function (pi: ExtensionAPI) {
 			extra_dirs: Type.Optional(Type.Array(Type.String(), { description: "Ещё папки для поиска" })),
 			limit: Type.Optional(Type.Number({ description: "Сколько проектов показать, по умолчанию 20" })),
 		}),
+		...quietRender(
+			() => "Ищу твои проекты Ableton…",
+			(r) => {
+				const n = Array.isArray(r?.details?.files) ? r.details.files.length : 0;
+				return n ? `нашёл ${plural(n, "проект", "проекта", "проектов")}` : "проектов .als не нашлось";
+			},
+		),
 		async execute(_id, params) {
 			const roots = projectRoots(params.extra_dirs ?? []);
 			const files = findProjects(roots, { limit: params.limit ?? 20 });
@@ -59,6 +67,16 @@ export default function (pi: ExtensionAPI) {
 			"клипы Session и Arrangement (имя, позиция, длина, число нот), аудиоклипы. Читает .als любой версии, Live может быть закрыт.",
 		promptSnippet: "Сводка проекта Ableton (.als): темп, треки, устройства, клипы",
 		parameters: Type.Object({ path: Type.String({ description: "Путь к .als (Windows или POSIX, можно ~/…)" }) }),
+		...quietRender(
+			(a) => `Смотрю проект «${projectName(a?.path)}»…`,
+			(r) => {
+				const d = r?.details ?? {};
+				const bits = [`${plural(d.tracks ?? 0, "трек", "трека", "треков")}`];
+				if (d.tempo) bits.push(`${Math.round(d.tempo)} BPM`);
+				if (d.liveVersion) bits.push(`Live ${d.liveVersion}`);
+				return bits.join(", ");
+			},
+		),
 		async execute(_id, params, _s, _u, ctx) {
 			const { project } = load(ctx.cwd, params.path);
 			return text(summarize(project), { tempo: project.tempo, liveVersion: project.liveVersion, tracks: project.tracks.length });
@@ -75,13 +93,17 @@ export default function (pi: ExtensionAPI) {
 			track: Type.Union([Type.String(), Type.Number()], { description: "Номер трека (с 1) или имя" }),
 			clip: Type.Union([Type.String(), Type.Number()], { description: "Номер клипа на треке (с 1: сначала Session, потом Arrangement, как в сводке) или имя" }),
 		}),
+		...quietRender(
+			() => "Смотрю ноты клипа…",
+			(r) => `${plural(r?.details?.notes ?? 0, "нота", "ноты", "нот")}`,
+		),
 		async execute(_id, params, _s, _u, ctx) {
 			const { project } = load(ctx.cwd, params.path);
 			const track = findTrack(project, params.track);
 			if (!track) throw new Error(`Нет трека «${params.track}». Треков: ${project.tracks.map((t, i) => `${i + 1}:${t.name}`).join(", ")}`);
 			const clip = findClip(track, params.clip);
 			if (!clip) throw new Error(`Нет клипа «${params.clip}» на «${track.name}» (клипов: ${track.clips.length}: ${track.clips.slice(0, 20).map((c, i) => `${i + 1}:${c.name || "?"}`).join(", ")})`);
-			return text(clipNotesText(project, track, clip));
+			return text(clipNotesText(project, track, clip), { clip: clip.name, notes: clip.kind === "midi" ? clip.notes.length : 0 });
 		},
 	});
 
@@ -94,6 +116,10 @@ export default function (pi: ExtensionAPI) {
 			"энергия по 8-тактовым блокам; по секциям, если есть локаторы. Результат комментируй, не пересказывай цифры подряд.",
 		promptSnippet: "Анализ нот проекта Ableton: тональность, аккорды, ритм, диапазоны, энергия",
 		parameters: Type.Object({ path: Type.String({ description: "Путь к .als" }) }),
+		...quietRender(
+			(a) => `Считаю теорию по нотам «${projectName(a?.path)}»…`,
+			(r) => headLine(r?.content?.[0]?.text ?? "") || "разобрал",
+		),
 		async execute(_id, params, _s, _u, ctx) {
 			const { project } = load(ctx.cwd, params.path);
 			return text(analyzeProject(project));
@@ -111,6 +137,10 @@ export default function (pi: ExtensionAPI) {
 			path: Type.String({ description: "Путь к .als" }),
 			save: Type.Optional(Type.Boolean({ description: "Записать новый снимок после сравнения (по умолчанию да)" })),
 		}),
+		...quietRender(
+			(a) => `Сравниваю «${projectName(a?.path)}» с прошлым разом…`,
+			(r) => (r?.details?.first ? "первый снимок записан" : plural(r?.details?.changes ?? 0, "изменение", "изменения", "изменений")),
+		),
 		async execute(_id, params, _s, _u, ctx) {
 			const { project } = load(ctx.cwd, params.path);
 			const r = projectDiff(project, ctx.cwd, params.save ?? true);

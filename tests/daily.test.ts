@@ -1,25 +1,15 @@
 /**
- * Тихие проверки на старте сессии (раз в сутки), журнал для разговора и общие отметки в данных наставника.
+ * Тихие проверки на старте сессии (раз в сутки), журнал для разговора и общие отметки в данных агента.
  * Сеть не нужна: и версию, и баланс подставляем заглушками.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./stubs/packages.ts";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-try {
-	await import("typebox");
-} catch {
-	registerHooks({
-		resolve(specifier, context, next) {
-			if (specifier === "typebox") return { url: new URL("./stubs/typebox.ts", import.meta.url).href, shortCircuit: true };
-			return next(specifier, context);
-		},
-	});
-}
 
 const upd = await import("../extensions/update.ts");
 const log = await import("../extensions/log.ts");
@@ -39,7 +29,7 @@ test("отметка «раз в сутки»: нет файла — пора, �
 	assert.equal(sess.shouldRunDaily(file, now), true, "битая дата = как будто не делали");
 });
 
-test("корень данных наставника: MM_ROOT важнее LOCALAPPDATA", () => {
+test("корень данных агента: MM_ROOT важнее LOCALAPPDATA", () => {
 	assert.equal(sess.mmRoot({ MM_ROOT: "/tmp/mm" } as any), "/tmp/mm");
 	assert.equal(sess.mmRoot({ LOCALAPPDATA: "/tmp/local" } as any), path.join("/tmp/local", "music_mentor"));
 });
@@ -63,7 +53,7 @@ test("обновление на старте: не чаще раза в сутк
 		return { current: "v0.1.0", latest: "v0.2.0" };
 	};
 	const first = await upd.updateReminder({ root: dir, latest });
-	assert.match(first ?? "", /новая версия наставника v0\.2\.0/);
+	assert.match(first ?? "", /новая версия агента v0\.2\.0/);
 	const now = new Date();
 	assert.equal(await upd.updateReminder({ root: dir, now: new Date(now.getTime() + 3_600_000), latest }), undefined);
 	assert.equal(asked, 1, "второй раз в те же сутки сервер не спрашиваем");
