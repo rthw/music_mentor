@@ -297,7 +297,7 @@ export function createRelay(opts) {
 			}
 			const args = [
 				"-W", "-i", sock, "-b", `/mentor/t/${L.name}`, "-T", "xterm-256color", "-P", "5",
-				"-t", "fontSize=16", "-t", "rendererType=canvas", "-t", "titleFixed=Музыкальный наставник", "-t", "disableLeaveAlert=true",
+				"-t", "fontSize=16", "-t", "fontFamily=Consolas,'Courier New',monospace", "-t", "rendererType=canvas", "-t", "titleFixed=Музыкальный наставник", "-t", "disableLeaveAlert=true",
 				...o.webCommand(L.name),
 			];
 			const proc = spawn(o.ttyd, args, { stdio: ["ignore", "ignore", "pipe"] });

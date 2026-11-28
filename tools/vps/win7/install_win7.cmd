@@ -8,17 +8,15 @@ set "DEST=%LOCALAPPDATA%\music_mentor"
 echo.
 echo === Music mentor: installation ===
 echo.
-if not exist "%SRC%putty.exe" goto notunpacked
-if not exist "%SRC%Muzykalnyj nastavnik.cmd" goto notunpacked
+if not exist "%SRC%mentor_remote.json" goto notunpacked
+if not exist "%SRC%mentor_url.txt" goto notunpacked
 if not exist "%SRC%MentorBridge\__init__.py" goto notunpacked
 
 echo [1/4] Copying programs to %DEST%
 if not exist "%DEST%" mkdir "%DEST%"
-copy /y "%SRC%putty.exe" "%DEST%\" >nul || goto fail
-copy /y "%SRC%Muzykalnyj nastavnik.cmd" "%DEST%\start_mentor.cmd" >nul || goto fail
+copy /y "%SRC%mentor_url.txt" "%DEST%\" >nul || goto fail
 copy /y "%SRC%README.txt" "%DEST%\" >nul
 copy /y "%SRC%win7_shortcut.ps1" "%DEST%\" >nul
-for %%F in ("%SRC%*.ppk") do copy /y "%%F" "%DEST%\" >nul || goto fail
 
 echo [2/4] Copying the Ableton Live bridge (MentorBridge)
 set "DOCS="
@@ -28,6 +26,8 @@ set "RS=%DOCS%\Ableton\User Library\Remote Scripts"
 if not exist "%RS%" mkdir "%RS%"
 if exist "%RS%\MentorBridge" rmdir /s /q "%RS%\MentorBridge"
 xcopy "%SRC%MentorBridge" "%RS%\MentorBridge\" /e /i /y /q >nul || goto fail
+rem the bridge reads its server address and personal key from this file; nobody else should get it
+copy /y "%SRC%mentor_remote.json" "%RS%\MentorBridge\" >nul || goto fail
 echo     -> %RS%\MentorBridge
 
 echo [3/4] Checking the Windows component Live 10 needs (UCRT)
@@ -63,7 +63,7 @@ echo.
 echo Last step, once, in Ableton Live 10:
 echo   Options - Preferences - Link MIDI - Control Surface: choose "MentorBridge"
 echo   (Input and Output may stay "None"). Restart Live if MentorBridge is not in the list.
-echo Then start the mentor with the "Muzykalnyj nastavnik" shortcut on the Desktop.
+echo Then open the mentor with the "Muzykalnyj nastavnik" shortcut on the Desktop (it opens in your browser).
 echo (Details in Russian: %DEST%\README.txt)
 echo.
 pause
