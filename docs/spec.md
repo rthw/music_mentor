@@ -437,6 +437,31 @@ short-term max (3 с), LRA (3 с, шаг 1 с, гейт −70/−20, 10–95 п�
   (одностороннее сообщение «music_mentor · заявка»), пересылка не удалась — 502, клиент оставит заявку ждать. Нет сети —
   заявка в `learner/wishes.md` («ждёт отправки»), повтор на `session_start` не чаще раза в сутки.
 
+## 7b. Win7: серверный режим (T1929, T1938)
+
+У друга Windows 7: Node 22 и pi там не поставить, а Live 10.1.x работает. Поэтому pi живёт на сервере
+(контейнер `tools/vps/`), у друга — только PuTTY и мост.
+
+```
+Win7: Live 10 + MentorBridge (127.0.0.1:9878) ◄── PuTTY -R <порт ученика>:127.0.0.1:9878 ──► сервер: sshd → mentor_login → pi
+```
+
+- Вход — только по ключу, `ForceCommand` сразу запускает pi в `~/music_mentor`; `-hostkey` в лаунчере обязателен
+  (PuTTY не задаёт вопросов). Ученики — группа `mentors` (`AllowGroups`), новый ученик конфиг не меняет.
+- У каждого ученика свой порт туннеля на сервере (9901, 9902, …): `new_learner.sh` пишет его в `~/.mm_bridge_port`,
+  `mentor_login` отдаёт pi как `MM_LIVE_PORT`, а в `authorized_keys` стоит `restrict,permitlisten="localhost:<порт>"` —
+  ключ не открывает ни оболочку, ни чужой порт, ни `-L`.
+- Заведение: `tools/vps/new_learner.sh <имя> --host H --port P` → `~/.cache/music_mentor/bundles/<имя>.zip`:
+  `putty.exe`, `<имя>.ppk`, `MentorBridge/`, `install_win7.cmd`, `win7_shortcut.ps1`, `Muzykalnyj nastavnik.cmd`, `vc_redist.x64.exe`, `README.txt`.
+  Настройки pi — `tools/vps/mm_provision.mjs`, зеркало `Set-PiSettings`/`Set-PiGrowSettings` (пути Linux).
+- `install_win7.cmd` (cmd + PowerShell 2.0, без сети, повторный запуск безопасен): копирует в `%LOCALAPPDATA%\music_mentor`,
+  ставит мост в `Documents\Ableton\User Library\Remote Scripts` (Live 10.1.13+), UCRT из `vc_redist.x64.exe`, если нет
+  `System32\ucrtbase.dll`, делает ярлык «Музыкальный наставник» и печатает, как включить мост (Preferences → Link MIDI → Control Surface).
+- Кодировка: все `.cmd`/`.ps1` — ASCII (cmd Win7 в cp866, `chcp 65001` ненадёжен); русское имя ярлыка собирается из кодов
+  символов, сохраняется через временное ASCII-имя; README — по-русски, UTF-8 с BOM и CRLF (Блокнот Win7). Имена файлов в zip — ASCII.
+- Сбой сети: лаунчер ждёт `putty.exe` (`start /wait`), при коде ≠ 0 печатает, что проверить; смена ключа сервера — «не продолжать».
+- Не проверено воркером: живая установка на VM `mm_win7_pilot`; `-hostkey` стабилен, пока жив контейнер (`tools/vps/README.md`).
+
 ## 8. Гипотезы (проверить, не верить)
 
 - Сторонние Remote Scripts работают в Lite и Intro (источники косвенные).
@@ -516,3 +541,7 @@ short-term max (3 с), LRA (3 с, шаг 1 с, гейт −70/−20, 10–95 п�
   лаунчер не возвращалось и выключатель не срабатывал (нашли именно так). Замок согласия переживает перезапуск pi (файл в
   `%TEMP%`, хеш рабочей папки, срок жизни черновика 30 минут): в режиме `pi -p` каждый ход — отдельный процесс, а после
   `/reload` состояние в памяти пропало бы. «дада» вместо «да» замок не засчитывает — так и задумано.
+- 2026-11-28 (T1938): Win7 — серверный режим (§7b). Один контейнер на всех учеников, доступ по группе `mentors`;
+  у каждого свой порт обратного туннеля, иначе pi одного читал бы Live другого; в `authorized_keys` `restrict` +
+  `permitlisten`. Приватный ключ существует только в zip (в контейнере `shred` сразу после `puttygen`). vc_redist
+  и putty.exe кладутся в zip (на Win7 TLS-скачивание ненадёжно), суммы — `tools/vps/win7/assets.sha256`. Все `.cmd` — ASCII.

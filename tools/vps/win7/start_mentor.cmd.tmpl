@@ -1,0 +1,32 @@
+@echo off
+rem music_mentor (Win7): PuTTY session to the server where the mentor (pi) works,
+rem plus a reverse tunnel server:{{BRIDGE_PORT}} -> this PC:9878 (MentorBridge inside Ableton Live).
+rem Messages are ASCII on purpose: cmd.exe on Windows 7 uses a legacy code page.
+rem -hostkey pins the server key, so PuTTY never asks "trust this host?".
+cd /d "%~dp0"
+if not exist "%~dp0putty.exe" goto missing
+if not exist "%~dp0{{PPK}}" goto missing
+start "" /wait "%~dp0putty.exe" -ssh {{USER}}@{{HOST}} -P {{PORT}} -i "%~dp0{{PPK}}" -hostkey {{HOSTKEY}} -R {{BRIDGE_PORT}}:127.0.0.1:9878 -t
+if errorlevel 1 goto failed
+goto done
+:missing
+echo.
+echo Some program files are missing next to this launcher.
+echo Run install_win7.cmd again from the unpacked folder.
+echo.
+pause
+goto done
+:failed
+echo.
+echo ================================================================
+echo  The connection to the server failed or was refused.
+echo  1. Check that the internet works (open any web site).
+echo  2. Close this window and start "Muzykalnyj nastavnik" again.
+echo  3. Still no luck: write to the author and send the text
+echo     of the PuTTY error window (see README.txt, the last section).
+echo  (If PuTTY said the host key changed: do NOT continue,
+echo   the server may have been replaced - tell the author.)
+echo ================================================================
+echo.
+pause
+:done
