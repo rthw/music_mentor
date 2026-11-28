@@ -9,8 +9,13 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
+import ssl
+import subprocess
 import sys
+import tempfile
+import time
 import threading
 import types
 import unittest
@@ -25,7 +30,7 @@ _cs.ControlSurface = type(str("ControlSurface"), (object,), {})
 sys.modules.setdefault(str("_Framework"), types.ModuleType(str("_Framework")))
 sys.modules.setdefault(str("_Framework.ControlSurface"), _cs)
 
-from MentorBridge import commands, protocol, server  # noqa: E402
+from MentorBridge import commands, protocol, remote, server  # noqa: E402
 import fake_lom  # noqa: E402
 
 PREFIX = commands.PREFIX
@@ -501,6 +506,263 @@ class ServerTests(unittest.TestCase):
     def test_port_constant(self):
         import MentorBridge
         self.assertEqual(MentorBridge.PORT, 9878)
+
+
+try:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+except ImportError:  # Python 2
+    from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+
+TOKEN = "t" * 43
+
+
+class FakeRelay(object):
+    """Тестовый сервер на месте ретранслятора: отдаёт запросы по next, собирает result."""
+
+    def __init__(self, certfile=None, keyfile=None):
+        self.requests = []   # что отдать мосту: (id, line)
+        self.results = {}    # id -> line
+        self.hits = []       # (метод, путь)
+        self.fail_next = 0   # столько ближайших next ответить 503
+        self.cond = threading.Condition()
+        relay = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def log_message(self, *args):
+                pass
+
+            def _send(self, status, body=b""):
+                self.send_response(status)
+                self.send_header(str("Content-Length"), str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                relay.hits.append(("GET", self.path))
+                if self.path != "/mentor/b/%s/next" % TOKEN:
+                    return self._send(403)
+                with relay.cond:
+                    if relay.fail_next:
+                        relay.fail_next -= 1
+                        return self._send(503)
+                    deadline = time.time() + 0.3
+                    while not relay.requests and time.time() < deadline:
+                        relay.cond.wait(0.05)
+                    if not relay.requests:
+                        return self._send(204)
+                    rid, line = relay.requests.pop(0)
+                self._send(200, json.dumps({"id": rid, "line": line}).encode("utf-8"))
+
+            def do_POST(self):
+                relay.hits.append(("POST", self.path))
+                if self.path != "/mentor/b/%s/result" % TOKEN:
+                    return self._send(403)
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8"))
+                with relay.cond:
+                    relay.results[body["id"]] = body["line"]
+                    relay.cond.notify_all()
+                self._send(200, b'{"ok":true}')
+
+        self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        if certfile:
+            sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER if hasattr(ssl, "PROTOCOL_TLS_SERVER") else ssl.PROTOCOL_SSLv23)
+            sctx.load_cert_chain(certfile, keyfile)
+            self.httpd.socket = sctx.wrap_socket(self.httpd.socket, server_side=True)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def ask(self, rid, line, timeout=5.0):
+        with self.cond:
+            self.requests.append((rid, line))
+            self.cond.notify_all()
+            deadline = time.time() + timeout
+            while rid not in self.results and time.time() < deadline:
+                self.cond.wait(0.05)
+            return self.results.get(rid)
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+class RemoteTests(unittest.TestCase):
+    """HTTPS-транспорт: мост сам ходит к ретранслятору, LOM по-прежнему только в потоке poll()."""
+
+    def setUp(self):
+        self.ctx = fake_lom.make_ctx("legacy")
+        fake_lom.learner_project(self.ctx)
+        self.srv = server.BridgeServer("127.0.0.1", 0)
+        self.srv.start()
+        self.logs = []
+        self.threads = []
+        self.stop = threading.Event()
+        self.poll_ident = []
+
+        def handler(line):
+            self.threads.append(threading.current_thread().ident)
+            return protocol.dispatch(line, commands.COMMANDS, self.ctx)
+
+        def loop():
+            self.poll_ident.append(threading.current_thread().ident)
+            while not self.stop.is_set():
+                self.srv.poll(handler)
+                self.stop.wait(0.01)
+
+        self.loop = threading.Thread(target=loop)
+        self.loop.daemon = True
+        self.loop.start()
+        self.links = []
+        self.relays = []
+
+    def tearDown(self):
+        for link in self.links:
+            link.stop()
+        self.stop.set()
+        self.loop.join(2)
+        self.srv.stop()
+        for relay in self.relays:
+            relay.close()
+
+    def link(self, relay, wait=None, cafile=None, url=None):
+        cfg = {"url": url or "http://127.0.0.1:%d/mentor" % relay.port, "token": TOKEN}
+        link = remote.RemoteLink(cfg, self.srv, self.logs.append, cafile=cafile, wait=wait)
+        self.links.append(link)
+        link.start()
+        return link
+
+    def relay(self, **kw):
+        relay = FakeRelay(**kw)
+        self.relays.append(relay)
+        return relay
+
+    def test_ping_and_unicode_through_http(self):
+        relay = self.relay()
+        self.link(relay)
+        out = json.loads(relay.ask("1", '{"cmd":"ping","id":1}'))
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["id"], 1)
+        line = json.dumps({"cmd": "add_midi_track", "name": "кириллица"}, ensure_ascii=False)
+        out = json.loads(relay.ask("2", line))
+        self.assertEqual(out["result"]["name"], PREFIX + "кириллица")
+        self.assertFalse(json.loads(relay.ask("3", "это не json"))["ok"])
+        self.assertEqual(set(self.threads), set(self.poll_ident))  # LOM только в потоке poll
+        self.assertTrue(all(token_free(m) for m in self.logs), self.logs)
+
+    def test_parallel_requests(self):
+        relay = self.relay()
+        self.link(relay)
+        with relay.cond:
+            for i in range(4):
+                relay.requests.append((str(i), '{"cmd":"ping","id":%d}' % i))
+            relay.cond.notify_all()
+            deadline = time.time() + 5
+            while len(relay.results) < 4 and time.time() < deadline:
+                relay.cond.wait(0.05)
+        self.assertEqual(sorted(json.loads(v)["id"] for v in relay.results.values()), [0, 1, 2, 3])
+
+    def test_network_down_retries_with_pause_and_recovers(self):
+        relay = self.relay()
+        relay.fail_next = 3
+        pauses = []
+
+        def wait(seconds):
+            pauses.append(seconds)
+            time.sleep(0.01)
+
+        link = self.link(relay, wait=wait)
+        out = relay.ask("1", '{"cmd":"ping"}')
+        self.assertTrue(json.loads(out)["ok"])
+        self.assertEqual(pauses[:3], [1.0, 2.0, 4.0])  # пауза растёт
+        self.assertLessEqual(max(pauses), remote.MAX_BACKOFF)
+        self.assertTrue(link.connected)
+
+    def test_unreachable_server_does_not_block_and_logs_once(self):
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()  # порт закрыт
+        pauses = []
+        cfg = {"url": "http://127.0.0.1:%d/mentor" % port, "token": TOKEN}
+        t0 = time.time()
+        link = remote.RemoteLink(cfg, self.srv, self.logs.append, wait=lambda sec: (pauses.append(sec), time.sleep(0.01)))
+        self.links.append(link)
+        link.start()
+        self.assertLess(time.time() - t0, 0.5, "start() не должен ждать сети")
+        deadline = time.time() + 3
+        while len(pauses) < 6 and time.time() < deadline:
+            time.sleep(0.02)
+        self.assertGreaterEqual(len(pauses), 6)
+        self.assertEqual(max(pauses), 30.0 if len(pauses) > 6 else max(pauses))
+        self.assertTrue(link.stop() is None)
+        # локальный TCP жив и отвечает, пока сети нет
+        sock = socket.create_connection(("127.0.0.1", self.srv.port), 5)
+        sock.sendall(b'{"cmd":"ping"}\n')
+        self.assertTrue(json.loads(sock.makefile("rb").readline().decode("utf-8"))["ok"])
+        sock.close()
+
+    def test_wrong_token_is_not_ok(self):
+        relay = self.relay()
+        cfg = {"url": "http://127.0.0.1:%d/mentor" % relay.port, "token": "x" * 43}
+        link = remote.RemoteLink(cfg, self.srv, self.logs.append, wait=lambda sec: time.sleep(0.01))
+        self.links.append(link)
+        link.start()
+        time.sleep(0.3)
+        self.assertFalse(link.connected)
+        self.assertTrue(any("403" in m for m in self.logs), self.logs)
+        self.assertTrue(all("x" * 43 not in m for m in self.logs))
+
+    def test_config_file(self):
+        d = tempfile.mkdtemp()
+        try:
+            self.assertIsNone(remote.find_config(d))
+            with io.open(os.path.join(d, "mentor_remote.json"), "w", encoding="utf-8") as fh:
+                fh.write("\ufeff" + json.dumps({"url": "https://present.whimsical.work/mentor", "token": TOKEN}))
+            self.assertEqual(remote.find_config(d)["token"], TOKEN)
+            sub = os.path.join(d, "MentorBridge")
+            os.mkdir(sub)
+            self.assertEqual(remote.find_config(sub)["url"], "https://present.whimsical.work/mentor")  # файл рядом с папкой моста
+            with io.open(os.path.join(d, "mentor_remote.json"), "w", encoding="utf-8") as fh:
+                fh.write('{"url": "x"}')
+            self.assertRaises(ValueError, remote.find_config, d)
+        finally:
+            shutil.rmtree(d)
+
+    def test_no_config_means_no_remote_in_control_surface(self):
+        import MentorBridge
+        here = os.path.dirname(os.path.abspath(MentorBridge.__file__))
+        self.assertFalse(os.path.exists(os.path.join(here, "mentor_remote.json")))
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(here), "mentor_remote.json")))
+
+    @unittest.skipUnless(any(os.path.exists(os.path.join(p, "openssl")) for p in os.environ.get("PATH", "").split(os.pathsep)), "нет openssl")
+    def test_certificate_is_verified(self):
+        d = tempfile.mkdtemp()
+        try:
+            crt, key = os.path.join(d, "c.pem"), os.path.join(d, "k.pem")
+            cmd = ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", crt, "-days", "2",
+                   "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"]
+            if subprocess.call(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) != 0:
+                self.skipTest("openssl не умеет -addext")
+            relay = self.relay(certfile=crt, keyfile=key)
+            url = "https://localhost:%d/mentor" % relay.port
+            # без доверия к этому сертификату - отказ, запрос не уходит
+            bad = self.link(relay, wait=lambda sec: time.sleep(0.05), url=url)
+            time.sleep(0.4)
+            self.assertFalse(bad.connected)
+            self.assertEqual(relay.hits, [])
+            bad.stop()
+            # с доверием - работает
+            self.link(relay, cafile=crt, url=url)
+            self.assertTrue(json.loads(relay.ask("1", '{"cmd":"ping"}'))["ok"])
+        finally:
+            shutil.rmtree(d)
+
+
+def token_free(message):
+    return TOKEN not in message
 
 
 class SourceRulesTests(unittest.TestCase):

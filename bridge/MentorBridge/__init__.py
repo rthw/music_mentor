@@ -58,6 +58,7 @@ class MentorBridge(ControlSurface):
         super(MentorBridge, self).__init__(c_instance)
         self._server = None
         self._ctx = None
+        self._remote = None
         try:
             from .commands import COMMANDS
             from .protocol import dispatch
@@ -67,12 +68,24 @@ class MentorBridge(ControlSurface):
             self._ctx = _Ctx(self)
             self._server = BridgeServer(HOST, PORT, _log)
             self._server.start()
+            self._start_remote()
             self.show_message("MentorBridge: listening on %s:%d" % (HOST, PORT))
             _log("started")
         except Exception as exc:  # noqa: BLE001
             import traceback
             _log("start failed: %s" % traceback.format_exc())
             self.show_message("MentorBridge failed: %s" % exc)
+
+    def _start_remote(self):
+        """T1940: mentor_remote.json рядом - запросы идут ещё и по HTTPS. Сбой здесь не мешает локальному TCP."""
+        try:
+            from .remote import RemoteLink, find_config
+            cfg = find_config(os.path.dirname(os.path.abspath(__file__)))
+            if cfg:
+                self._remote = RemoteLink(cfg, self._server, _log)
+                self._remote.start()
+        except Exception as exc:  # noqa: BLE001
+            _log("remote не запущен: %s: %s" % (exc.__class__.__name__, exc))
 
     def _handle(self, line):
         return self._dispatch(line, self._commands, self._ctx, _log)
@@ -84,6 +97,9 @@ class MentorBridge(ControlSurface):
 
     def disconnect(self):
         _log("disconnect")
+        if self._remote is not None:
+            self._remote.stop()
+            self._remote = None
         if self._server is not None:
             self._server.stop()
             self._server = None

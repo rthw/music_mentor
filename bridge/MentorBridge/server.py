@@ -49,6 +49,7 @@ class BridgeServer(object):
         self._stopped = threading.Event()
         self._conns = set()
         self._lock = threading.Lock()
+        self.request_timeout = REQUEST_TIMEOUT
 
     def start(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -76,6 +77,12 @@ class BridgeServer(object):
                 pass
             self._sock = None
         self.log("stopped")
+
+    def submit(self, line):
+        """Положить запрос в очередь главного потока (для HTTPS-транспорта); ответ ждут на Pending.done."""
+        pending = Pending(line)
+        self._queue.put(pending)
+        return pending
 
     def poll(self, handler, limit=16):
         """Только главный поток: ответить на запросы из очереди через handler(line) -> str."""
@@ -129,9 +136,8 @@ class BridgeServer(object):
                 line, buf = buf.split(b"\n", 1)
                 if not line.strip():
                     continue
-                pending = Pending(line)
-                self._queue.put(pending)
-                if pending.done.wait(REQUEST_TIMEOUT) and pending.response is not None:
+                pending = self.submit(line)
+                if pending.done.wait(self.request_timeout) and pending.response is not None:
                     conn.sendall(_bytes(pending.response) + b"\n")
                 else:
                     pending.cancelled = True
