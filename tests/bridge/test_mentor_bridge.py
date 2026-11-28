@@ -293,6 +293,125 @@ class ForbiddenTests(Base, unittest.TestCase):
         self.refuses("только на MIDI-трек", cmd="add_clip", track=1, slot=1, length_beats=4)
 
 
+class FileTests(Base, unittest.TestCase):
+    """files_list / file_read: только .als/.wav и только внутри корней."""
+
+    def setUp(self):
+        import base64
+        import shutil
+        import tempfile
+        Base.setUp(self)
+        self.b64 = base64
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="mm_files_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = os.path.join(self.tmp, "home")
+        self.projects = os.path.join(self.home, "Documents", "Проекты")
+        os.makedirs(os.path.join(self.projects, "Backup"))
+        os.makedirs(os.path.join(self.tmp, "outside"))
+        self.song = os.path.join(self.projects, "Ночь.als")
+        self.wav = os.path.join(self.projects, "mix.wav")
+        self.secret = os.path.join(self.tmp, "outside", "secret.als")
+        self.payload = bytes(bytearray(i % 251 for i in range(1300)))
+        for path in (self.song, self.wav, self.secret, os.path.join(self.projects, "Backup", "old.als"),
+                     os.path.join(self.projects, "notes.txt")):
+            with open(path, "wb") as fh:
+                fh.write(self.payload)
+        self.saved = dict((k, os.environ.get(k)) for k in ("HOME", "USERPROFILE", "MM_PROJECT_DIRS"))
+        os.environ[str("HOME")] = str(self.home)
+        os.environ[str("USERPROFILE")] = str(self.home)
+        os.environ.pop("MM_PROJECT_DIRS", None)
+        del commands._granted[:]
+        self.addCleanup(self.restore)
+
+    def restore(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[str(k)] = v
+        del commands._granted[:]
+
+    def read_all(self, path, step):
+        out, offset = b"", 0
+        while True:
+            r = call(self.ctx, cmd="file_read", path=path, offset=offset, length=step)
+            self.assertTrue(r["ok"], r)
+            out += self.b64.b64decode(r["result"]["data"])
+            offset = len(out)
+            if r["result"]["eof"]:
+                return out, r["result"]
+
+    def test_list_als_skips_backup_and_other_kinds(self):
+        r = call(self.ctx, cmd="files_list", kind="als")["result"]
+        self.assertEqual([f["path"] for f in r["files"]], [self.song])
+        self.assertEqual(r["files"][0]["size"], 1300)
+        self.assertGreater(r["files"][0]["mtime"], 0)
+        w = call(self.ctx, cmd="files_list", kind="wav")["result"]
+        self.assertEqual([f["path"] for f in w["files"]], [self.wav])
+
+    def test_list_bad_kind(self):
+        self.assertFalse(call(self.ctx, cmd="files_list", kind="exe")["ok"])
+
+    def test_read_in_chunks_matches_file(self):
+        data, last = self.read_all(self.wav, 500)
+        self.assertEqual(data, self.payload)
+        self.assertEqual(last["size"], 1300)
+
+    def test_read_length_capped(self):
+        r = call(self.ctx, cmd="file_read", path=self.wav, offset=0, length=10 ** 9)["result"]
+        self.assertEqual(len(self.b64.b64decode(r["data"])), 1300)
+        self.assertTrue(r["eof"])
+        mid = call(self.ctx, cmd="file_read", path=self.wav, offset=0, length=100)["result"]
+        self.assertFalse(mid["eof"])
+
+    def test_read_outside_roots_refused(self):
+        resp = call(self.ctx, cmd="file_read", path=self.secret, offset=0, length=10)
+        self.assertFalse(resp["ok"])
+        self.assertIn("вне папок", resp["error"])
+
+    def test_read_traversal_refused(self):
+        sneaky = os.path.join(self.projects, "..", "..", "..", "outside", "secret.als")
+        self.assertFalse(call(self.ctx, cmd="file_read", path=sneaky, offset=0, length=10)["ok"])
+
+    @unittest.skipIf(not hasattr(os, "symlink"), "нет symlink")
+    def test_read_symlink_out_refused(self):
+        link = os.path.join(self.projects, "link.als")
+        try:
+            os.symlink(self.secret, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink не создаётся")
+        resp = call(self.ctx, cmd="file_read", path=link, offset=0, length=10)
+        self.assertFalse(resp["ok"])
+        self.assertIn("вне папок", resp["error"])
+
+    def test_read_other_extension_refused(self):
+        resp = call(self.ctx, cmd="file_read", path=os.path.join(self.projects, "notes.txt"), offset=0, length=10)
+        self.assertFalse(resp["ok"])
+        self.assertIn("только .als и .wav", resp["error"])
+
+    def test_read_bad_args_and_missing(self):
+        self.assertFalse(call(self.ctx, cmd="file_read", offset=0, length=10)["ok"])
+        self.assertFalse(call(self.ctx, cmd="file_read", path=self.wav, offset=-1, length=10)["ok"])
+        self.assertFalse(call(self.ctx, cmd="file_read", path=self.wav, offset=0, length=0)["ok"])
+        missing = os.path.join(self.projects, "нет.als")
+        self.assertIn("нет", call(self.ctx, cmd="file_read", path=missing, offset=0, length=10)["error"])
+
+    def test_extra_root_listed_then_readable(self):
+        extra = os.path.join(self.tmp, "outside")
+        self.assertFalse(call(self.ctx, cmd="file_read", path=self.secret, offset=0, length=10)["ok"])
+        r = call(self.ctx, cmd="files_list", kind="als", roots=[extra])["result"]
+        self.assertIn(self.secret, [f["path"] for f in r["files"]])
+        self.assertTrue(call(self.ctx, cmd="file_read", path=self.secret, offset=0, length=10)["ok"])
+
+    def test_mm_project_dirs(self):
+        os.environ[str("MM_PROJECT_DIRS")] = str(os.path.join(self.tmp, "outside"))
+        self.assertTrue(call(self.ctx, cmd="file_read", path=self.secret, offset=0, length=10)["ok"])
+
+    def test_commands_not_forbidden_and_ping_version(self):
+        self.assertFalse(getattr(commands.COMMANDS["file_read"], "forbidden", False))
+        self.assertGreaterEqual(call(self.ctx, cmd="ping")["result"]["version"], 3)
+
+
 class NoteShimTests(unittest.TestCase):
     def roundtrip(self, profile):
         ctx = fake_lom.make_ctx(profile)

@@ -18,12 +18,15 @@
 """
 from __future__ import unicode_literals
 
+import base64
+import os
 import re
 import sys
+import time
 
 from .protocol import BridgeError, string_types, text_type, to_text
 
-BRIDGE_VERSION = 2
+BRIDGE_VERSION = 3
 PREFIX = "Подсказка: "
 HINT_COLOR = 0x2E9BFF  # фиксированный цвет треков и клипов-подсказок
 MAX_CLIP_BEATS = 512.0
@@ -609,6 +612,216 @@ def cmd_stop(ctx, args):
     return {"stopped": True}
 
 
+# ---------------------------------------------------------------- файлы ученика (для сервера без диска Windows)
+#
+# Pi может работать на сервере, а Live - у ученика: тогда .als и .wav лежат только на диске ученика, и их отдаёт
+# мост. Только чтение, только .als/.wav и только внутри корней: Documents (в т.ч. OneDrive), Desktop, Downloads,
+# Music, MM_PROJECT_DIRS и папки, которые ученик сам назвал в files_list(roots).
+
+FILE_KINDS = {"als": (".als",), "wav": (".wav",)}
+FILE_DEPTH = {"als": 6, "wav": 5}
+FILE_SKIP = set(["backup", "ableton project info", "node_modules", ".git", "samples", "presets", "$recycle.bin",
+                 "appdata"])
+MAX_READ = 512 * 1024
+LIST_DEFAULT = 200
+LIST_MAX = 2000
+LIST_MAX_DIRS = 4000
+LIST_SECONDS = 10.0  # обход идёт в главном потоке Live: дольше держать его нельзя
+MAX_GRANTED = 16
+_granted = []  # папки, названные учеником в files_list(roots): читать из них можно до перезапуска Live
+
+
+def _fs_text(value):
+    """Строка из окружения/ФС как Unicode (в Python 2 на Windows байты в системной кодировке)."""
+    if isinstance(value, bytes):
+        for enc in (sys.getfilesystemencoding() or "utf-8", "utf-8"):
+            try:
+                return value.decode(enc)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return None
+    return value
+
+
+def _env(name):
+    return _fs_text(os.environ.get(name)) if name in os.environ else None
+
+
+def _shell_folder(csidl):
+    """Папка Windows по CSIDL (Документы бывают перенесены в OneDrive); не Windows -> None."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf) == 0 and buf.value:
+            return buf.value
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _profile():
+    return _shell_folder(0x28) or _fs_text(os.path.expanduser("~"))
+
+
+def _real(path):
+    return os.path.realpath(path)
+
+
+def _same(path):
+    return os.path.normcase(path)
+
+
+def _is_within(real, root):
+    a, b = _same(real), _same(root).rstrip("\\/")
+    return a == b or a.startswith(b + os.sep) or a.startswith(b + "/")
+
+
+def _default_roots(kind):
+    home = _profile()
+    cand = [_shell_folder(5), _shell_folder(0x10)]
+    if home:
+        for sub in ("Documents", "Документы", "Desktop", "Рабочий стол"):
+            cand.append(os.path.join(home, sub))
+        for entry in _safe(lambda: os.listdir(home), []):
+            entry = _fs_text(entry)
+            if entry and entry.lower().startswith("onedrive"):
+                for sub in ("Documents", "Документы", "Desktop", "Рабочий стол"):
+                    cand.append(os.path.join(home, entry, sub))
+    for var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        base = _env(var)
+        if base:
+            for sub in ("Documents", "Документы", "Desktop", "Рабочий стол"):
+                cand.append(os.path.join(base, sub))
+    for d in (_env("MM_PROJECT_DIRS") or "").split(os.pathsep):
+        if d:
+            cand.append(d)
+    if kind == "wav" and home:
+        for sub in ("Downloads", "Загрузки", "Music", "Музыка"):
+            cand.append(os.path.join(home, sub))
+    return _dedupe_dirs(cand)
+
+
+def _dedupe_dirs(cand):
+    seen, out = set(), []
+    for c in cand:
+        if not c:
+            continue
+        real = _real(c)
+        key = _same(real)
+        if key in seen or not os.path.isdir(real):
+            continue
+        seen.add(key)
+        out.append(real)
+    return out
+
+
+def _allowed_roots():
+    return _default_roots("wav") + [g for g in _granted if os.path.isdir(g)]
+
+
+def _walk_files(roots, exts, max_depth, ignore_skip=False):
+    """.als/.wav под корнями: глубина, число папок и время ограничены. -> (словарь, обрезано ли)."""
+    found, state = {}, {"dirs": LIST_MAX_DIRS, "stop": time.time() + LIST_SECONDS, "cut": False}
+
+    def walk(directory, depth):
+        if state["dirs"] <= 0 or time.time() > state["stop"]:
+            state["cut"] = True
+            return
+        state["dirs"] -= 1
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            return
+        for raw in names:
+            name = _fs_text(raw)
+            if not name:
+                continue
+            full = os.path.join(directory, name)
+            if os.path.isdir(full):
+                if depth < max_depth and name.lower() not in FILE_SKIP and not os.path.islink(full):
+                    walk(full, depth + 1)
+            elif name.lower().endswith(exts):
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue  # файл исчез
+                found[_same(full)] = {"path": full, "size": int(st.st_size), "mtime": int(st.st_mtime * 1000)}
+
+    for root in roots:
+        walk(root, 0)
+    return found, state["cut"]
+
+
+def cmd_files_list(ctx, args):
+    kind = args.get("kind")
+    if kind not in FILE_KINDS:
+        raise BridgeError("Поле 'kind' - 'als' или 'wav'.")
+    extra = args.get("roots") or []
+    if not isinstance(extra, list) or len(extra) > MAX_GRANTED or not all(isinstance(e, string_types) for e in extra):
+        raise BridgeError("Поле 'roots' - список папок (не больше %d)." % MAX_GRANTED)
+    limit = args.get("limit", LIST_DEFAULT)
+    limit = min(limit, LIST_MAX) if _is_int(limit) and limit > 0 else LIST_DEFAULT
+    roots = _default_roots(kind)
+    skipped = []
+    for e in extra:
+        real = _real(e.strip().strip('"'))
+        if not os.path.isdir(real):
+            skipped.append(e)
+            continue
+        if not any(_same(real) == _same(g) for g in _granted):
+            if len(_granted) >= MAX_GRANTED:
+                del _granted[0]
+            _granted.append(real)
+        if not any(_same(real) == _same(r) for r in roots):
+            roots.append(real)
+    found, cut = _walk_files(roots, FILE_EXTS[kind], FILE_DEPTH[kind])
+    files = sorted(found.values(), key=lambda f: -f["mtime"])[:limit]
+    return {"files": files, "roots": roots, "skipped": skipped, "truncated": cut}
+
+
+FILE_EXTS = dict((k, tuple(v)) for k, v in FILE_KINDS.items())
+
+
+def _checked_file(path):
+    """Путь, который можно читать: .als/.wav, реальный файл внутри корней (после realpath)."""
+    if not isinstance(path, string_types) or not path.strip() or "\0" in path:
+        raise BridgeError("Не хватает поля 'path' (путь к .als или .wav).")
+    path = path.strip()
+    if not path.lower().endswith(FILE_EXTS["als"] + FILE_EXTS["wav"]):
+        raise BridgeError("Мост отдаёт только .als и .wav; «%s» - не они." % path)
+    real = _real(path)
+    if not any(_is_within(real, root) for root in _allowed_roots()):
+        raise BridgeError(
+            "Файл «%s» вне папок, которые мост отдаёт (Документы, Рабочий стол, Загрузки, Музыка, OneDrive, "
+            "MM_PROJECT_DIRS). Если проект лежит в другой папке - попроси ученика назвать её (files_list с roots)." % path)
+    if not os.path.isfile(real):
+        raise BridgeError("Файла «%s» нет." % path)
+    return real
+
+
+def cmd_file_read(ctx, args):
+    real = _checked_file(args.get("path"))
+    offset = args.get("offset", 0)
+    length = args.get("length", MAX_READ)
+    if not _is_int(offset) or offset < 0:
+        raise BridgeError("Поле 'offset' - целое число байт >= 0.")
+    if not _is_int(length) or length <= 0:
+        raise BridgeError("Поле 'length' - целое число байт > 0.")
+    length = min(length, MAX_READ)
+    try:
+        with open(real, "rb") as fh:
+            st = os.fstat(fh.fileno())
+            fh.seek(offset)
+            data = fh.read(length)
+    except (IOError, OSError) as exc:
+        raise BridgeError("Не смог прочитать «%s»: %s" % (args.get("path"), to_text(exc)))
+    size = int(st.st_size)
+    return {"data": base64.b64encode(data).decode("ascii"), "eof": offset + len(data) >= size, "size": size,
+            "mtime": int(st.st_mtime * 1000)}
+
+
 COMMANDS = {
     "ping": cmd_ping,
     "song": cmd_song,
@@ -623,6 +836,8 @@ COMMANDS = {
     "remove": cmd_remove,
     "fire_clip": cmd_fire_clip,
     "stop": cmd_stop,
+    "files_list": cmd_files_list,
+    "file_read": cmd_file_read,
 }
 
 # Команды, которых в мосте нет и не будет: на них отвечаем не «неизвестно», а объяснением запрета.
