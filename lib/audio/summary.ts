@@ -3,7 +3,6 @@
  * В модель уходит только этот текст — сам звук остаётся на машине ученика.
  */
 
-import path from "node:path";
 import { BANDS, type AudioAnalysis } from "./analyze.ts";
 
 export const SUMMARY_LIMIT = 1500;
@@ -19,7 +18,7 @@ export function mmss(sec: number): string {
 	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export const fileLabel = (a: AudioAnalysis) => path.basename(a.path);
+export const fileLabel = (a: AudioAnalysis) => a.path.split(/[\\/]/).filter(Boolean).pop() ?? a.path;
 
 export function headerLine(a: AudioAnalysis): string {
 	const i = a.info;

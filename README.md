@@ -37,6 +37,8 @@ Ableton (Live 10, 11 и 12), считает по нотам теорию — т�
 На Win7 pi не ставится, поэтому он работает на сервере, а у ученика — PuTTY и мост (`tools/vps/`, `docs/spec.md` §7b).
 Автор заводит ученика одной командой `tools/vps/new_learner.sh <имя> --host H --port P` и отдаёт ему zip
 (`install_win7.cmd` + `README.txt` на три-пять шагов).
+Проекты и wav ученика pi читает через мост (`MM_REMOTE_FILES=1`, ставит `mentor_login.sh`), поэтому они видны, только пока открыт Live;
+кэш на сервере — `~/.cache/music_mentor/remote/` (чистится сам: 7 дней, 2 ГБ).
 
 ## Агент растёт
 

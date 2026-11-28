@@ -6,5 +6,7 @@ export PI_SKIP_VERSION_CHECK=1
 # У каждого ученика свой порт туннеля (new_learner.sh кладёт его в ~/.mm_bridge_port и в
 # authorized_keys как permitlisten): иначе двое одновременно делили бы 9878 и pi одного читал бы Live другого.
 if [ -r "$HOME/.mm_bridge_port" ]; then MM_LIVE_PORT="$(tr -dc '0-9' < "$HOME/.mm_bridge_port")"; export MM_LIVE_PORT; fi
+# Файлы ученика (.als/.wav) читаются через мост: диска Windows на сервере нет (T1937). Без Live они не видны.
+export MM_REMOTE_FILES=1
 cd "$HOME/music_mentor" || exit 1
 exec pi

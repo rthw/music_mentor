@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { barBeat, barsLen } from "./format.ts";
 import type { Project } from "./parse.ts";
 
@@ -116,7 +116,7 @@ export function diffSnapshots(prev: Snapshot, cur: Snapshot): Change[] {
 }
 
 export function snapshotPath(cwd: string, file: string): string {
-	const base = basename(file).replace(/\.als$/i, "").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+	const base = (file.split(/[\\/]/).filter(Boolean).pop() ?? file).replace(/\.als$/i, "").replace(/[^\p{L}\p{N}_-]+/gu, "_");
 	return join(cwd, "learner", "snapshots", `${base}.json`);
 }
 

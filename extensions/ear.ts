@@ -25,8 +25,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
-import { readProject, type Project } from "../lib/als/parse.ts";
+import { type Project } from "../lib/als/parse.ts";
+import { RemoteClosed, listProjects, loadProject } from "../lib/remote/access.ts";
 import { comparePlay, compareText, compareVerdict } from "../lib/mm/compare.ts";
 import { EAR_KINDS, KIND_TITLES, buildMaterial, gradeChoice, makeTask, optionNotes, type EarKind, type EarLevel, type EarTask } from "../lib/mm/ear.ts";
 import { quietRender } from "../lib/mm/quiet.ts";
@@ -108,19 +108,19 @@ interface Row {
 	skipped?: boolean;
 }
 
-function readProjectFile(cwd: string, file: string): Project {
-	const full = normalizeUserPath(file, cwd);
+async function readProjectFile(cwd: string, file: string): Promise<Project> {
 	try {
-		return readProject(full);
+		return (await loadProject(cwd, file)).project;
 	} catch (e) {
-		throw new Error(`Не удалось прочитать проект ${full}: ${(e as Error).message}`);
+		if (e instanceof RemoteClosed) throw e;
+		throw new Error(`Не удалось прочитать проект ${file}: ${(e as Error).message}`);
 	}
 }
 
 /** Проект для заданий: указанный или самый свежий из его папок (как project_list). */
-function pickProject(cwd: string, file?: string): Project {
+async function pickProject(cwd: string, file?: string): Promise<Project> {
 	if (file) return readProjectFile(cwd, file);
-	const found = findProjects(projectRoots([cwd]), { limit: 1 });
+	const found = (await listProjects([cwd], 1)).files;
 	if (!found.length) {
 		throw new Error("Не нашёл ни одного проекта .als. Скажи, в каком треке тренируемся, и повтори с path (например «Ночь.als»).");
 	}
@@ -215,7 +215,7 @@ export default function (pi: ExtensionAPI) {
 				s.rows[s.current.row].skipped = true;
 			}
 			const level = (([1, 2, 3] as EarLevel[]).includes(p.level as EarLevel) ? p.level : (s.current ? s.current.task.level : 1)) as EarLevel;
-			const project = pickProject(ctx.cwd, p.path);
+			const project = await pickProject(ctx.cwd, p.path);
 			const material = buildMaterial(project);
 			if (!material) throw new Error("В этом проекте нет мелодических нот (пустые клипы или только ударные) — тренировать слух не на чем. Выбери другой трек.");
 			const kind = EAR_KINDS.includes(p.kind as EarKind) ? (p.kind as EarKind) : undefined;
@@ -349,7 +349,7 @@ export default function (pi: ExtensionAPI) {
 				await call({ cmd: "fire_clip", track: current.track, slot: current.slot }, addr());
 				return text(`Проигрываю задание ${current.number} ещё раз: трек «${EAR_TRACK}», слот ${current.slot}.`, { number: current.number, slot: current.slot });
 			}
-			const project = pickProject(ctx.cwd, undefined);
+			const project = await pickProject(ctx.cwd, undefined);
 			const material = buildMaterial(project);
 			const variant = material ? optionNotes(material, task, p.compare) : null;
 			if (!variant) {

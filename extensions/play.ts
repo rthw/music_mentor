@@ -10,10 +10,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { findClip, findTrack } from "../lib/als/notes.ts";
-import { readProject, type Clip, type Note, type Project, type Track } from "../lib/als/parse.ts";
-import { normalizeUserPath } from "../lib/als/files.ts";
+import { type Clip, type Note, type Project, type Track } from "../lib/als/parse.ts";
 import { comparePlay, compareText, compareVerdict, type PlayNote } from "../lib/mm/compare.ts";
 import { plural, quietRender } from "../lib/mm/quiet.ts";
+import { RemoteClosed, loadProject } from "../lib/remote/access.ts";
 import { bridgeAddress, call } from "./live.ts";
 
 const noteSchema = Type.Object({
@@ -41,12 +41,12 @@ interface Source {
 
 const bpbOf = (p: Project) => (p.timeSignature[0] * 4) / p.timeSignature[1];
 
-function readAlsFile(cwd: string, file: string): Project {
-	const full = normalizeUserPath(file, cwd);
+async function readAlsFile(cwd: string, file: string): Promise<Project> {
 	try {
-		return readProject(full);
+		return (await loadProject(cwd, file)).project;
 	} catch (e) {
-		throw new Error(`Не удалось прочитать проект ${full}: ${(e as Error).message}`);
+		if (e instanceof RemoteClosed) throw e;
+		throw new Error(`Не удалось прочитать проект ${file}: ${(e as Error).message}`);
 	}
 }
 
@@ -62,8 +62,8 @@ function pickClip(project: Project, trackRef: unknown, clipRef: unknown): { trac
 	return { track, clip };
 }
 
-function alsSource(cwd: string, file: string, trackRef: unknown, clipRef: unknown, role: string): Source {
-	const project = readAlsFile(cwd, file);
+async function alsSource(cwd: string, file: string, trackRef: unknown, clipRef: unknown, role: string): Promise<Source> {
+	const project = await readAlsFile(cwd, file);
 	const { track, clip } = pickClip(project, trackRef, clipRef);
 	return {
 		notes: clip.notes.map((n: Note) => ({ ...n })),
@@ -161,9 +161,9 @@ export default function (pi: ExtensionAPI) {
 			// Цель.
 			if (p.goal_notes?.length) {
 				goal = { notes: noteList(p.goal_notes), beatsPerBar: 4, label: `список нот (${plural(p.goal_notes.length, "нота", "ноты", "нот")})` };
-				tempoFromGoal = p.path ? readAlsFile(cwd, p.path).tempo : undefined;
+				tempoFromGoal = p.path ? (await readAlsFile(cwd, p.path)).tempo : undefined;
 			} else if (haveAlsGoal) {
-				const s = alsSource(cwd, p.path as string, p.track, p.clip, "цель");
+				const s = await alsSource(cwd, p.path as string, p.track, p.clip, "цель");
 				goal = { ...s, notes: s.notes };
 				tempoFromGoal = s.tempo;
 			} else if (haveLiveGoal) {
@@ -183,7 +183,7 @@ export default function (pi: ExtensionAPI) {
 				if (p.played_track === undefined || p.played_clip === undefined) {
 					throw new Error("Для сыгранного из проекта нужны played_track и played_clip (трек и клип).");
 				}
-				const s = alsSource(cwd, file, p.played_track, p.played_clip, "сыграно");
+				const s = await alsSource(cwd, file, p.played_track, p.played_clip, "сыграно");
 				played = { ...s, notes: s.notes };
 			} else if (p.live_track !== undefined) {
 				played = await liveSource(p.live_track, undefined, "сыграно");

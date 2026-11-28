@@ -12,6 +12,7 @@ import path from "node:path";
 import { projectDiff, type DiffResult } from "../als/diff.ts";
 import { findProjects, type ProjectFile, projectRoots } from "../als/files.ts";
 import { readProject, type Project } from "../als/parse.ts";
+import { isRemoteFiles } from "../remote/paths.ts";
 
 export const STATUSES = ["не встречал", "видел", "пробовал", "владеет"] as const;
 
@@ -283,8 +284,10 @@ export async function buildBriefing(cwd: string, deps: BriefingDeps = {}): Promi
 	const firstSession = isEmptyProfile(profile);
 
 	let projects: ProjectFile[] = [];
+	const remote = isRemoteFiles() && !deps.find && !deps.load;
 	try {
-		projects = (deps.find ?? findProjects)(deps.roots ?? projectRoots(), { limit: deps.limit ?? MAX_PROJECTS });
+		// сервер: файлы ученика — через мост (закрыт Live — просто без проектов, сводка не ломается)
+		projects = remote ? (await (await import("../remote/access.ts")).listProjects([], deps.limit ?? MAX_PROJECTS)).files : (deps.find ?? findProjects)(deps.roots ?? projectRoots(), { limit: deps.limit ?? MAX_PROJECTS });
 	} catch {
 		projects = [];
 	}
@@ -294,7 +297,7 @@ export async function buildBriefing(cwd: string, deps: BriefingDeps = {}): Promi
 	if (projects.length) {
 		const file = projects[0].path;
 		try {
-			const project = (deps.load ?? readProject)(file);
+			const project = remote ? (await (await import("../remote/access.ts")).loadProject(cwd, file)).project : (deps.load ?? readProject)(file);
 			diff = { file, result: (deps.diff ?? projectDiff)(project, cwd, true) };
 		} catch {
 			// проект не прочитался — покажем без сравнения

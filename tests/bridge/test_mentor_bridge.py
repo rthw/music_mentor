@@ -349,6 +349,12 @@ class FileTests(Base, unittest.TestCase):
         w = call(self.ctx, cmd="files_list", kind="wav")["result"]
         self.assertEqual([f["path"] for f in w["files"]], [self.wav])
 
+    def test_roots_only_does_not_walk(self):
+        r = call(self.ctx, cmd="files_list", kind="als", roots_only=True)["result"]
+        self.assertEqual(r["files"], [])
+        self.assertIn(os.path.join(self.home, "Documents"), r["roots"])
+        self.assertTrue(r["home"])
+
     def test_list_bad_kind(self):
         self.assertFalse(call(self.ctx, cmd="files_list", kind="exe")["ok"])
 

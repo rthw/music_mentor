@@ -1,6 +1,7 @@
 /** Компактная текстовая сводка проекта для модели: читается человеком и укладывается в ~4 КБ. */
 
-import { basename } from "node:path";
+/** Имя файла из пути Windows или POSIX (на сервере пути ученика остаются виндовыми). */
+const baseName = (f: string) => f.split(/[\\/]/).filter(Boolean).pop() ?? f;
 import { barBeat, barsLen } from "./format.ts";
 import type { Clip, Project, Track } from "./parse.ts";
 import { pcName } from "../music/pitch.ts";
@@ -39,7 +40,7 @@ export function summarize(p: Project): string {
 	const [num, den] = p.timeSignature;
 	const bpb = (num * 4) / den;
 	const lines: string[] = [];
-	const nm = basename(p.file).replace(/\.als$/i, "") || "проект";
+	const nm = baseName(p.file).replace(/\.als$/i, "") || "проект";
 	let head = `Проект «${nm}»: ${p.creator || "Live ?"}, ${Math.round(p.tempo * 100) / 100} BPM, ${num}/${den}`;
 	if (p.scale) head += `, лад Live: ${pcName(p.scale.root)} ${p.scale.name}${p.scale.inKey ? " (In Key)" : ""}`;
 	lines.push(head);

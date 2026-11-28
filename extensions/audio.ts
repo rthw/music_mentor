@@ -11,37 +11,46 @@
 import { statSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { normalizeUserPath } from "../lib/als/files.ts";
 import { analyzeWav, type AudioAnalysis, type AnalyzeOptions } from "../lib/audio/analyze.ts";
 import { compareAnalyses } from "../lib/audio/compare.ts";
-import { audioRoots, findWavs } from "../lib/audio/files.ts";
 import { fileLabel, mmss, num, summarizeAnalysis } from "../lib/audio/summary.ts";
 import { HOW_TO_WAV, WavError } from "../lib/audio/wav.ts";
+import { RemoteClosed, listWavs, localPath } from "../lib/remote/access.ts";
 import { headLine, quietRender } from "../lib/mm/quiet.ts";
 
 function text(t: string, details: object = {}) {
 	return { content: [{ type: "text" as const, text: t }], details };
 }
 
-function resolveWav(cwd: string, p: string | undefined, what: string): string {
+/** Путь к wav для чтения: `shown` — как его видит ученик, `local` — что открывать (в удалённом режиме — кэш). */
+async function resolveWav(cwd: string, p: string | undefined, what: string): Promise<{ shown: string; local: string }> {
 	if (!p) {
-		const recent = findWavs(audioRoots(), { limit: 5 });
+		const recent = (await listWavs([], 5)).files;
 		const list = recent.map((f) => f.path).join("; ");
 		throw new Error(`Не указан ${what}. ${recent.length ? `Свежие wav: ${list}.` : "wav не нашлось: попроси экспортировать трек (File → Export Audio/Video, WAV)."}`);
 	}
-	const full = normalizeUserPath(p, cwd);
+	let r: { shown: string; local: string };
 	try {
-		if (!statSync(full).isFile()) throw new Error("не файл");
-	} catch {
-		if (/\.mp3$/i.test(full)) throw new Error(`Это mp3, а не wav. ${HOW_TO_WAV}`);
-		throw new Error(`Нет файла ${full}. Свежие wav можно найти через audio_list.`);
+		r = await localPath(cwd, p);
+	} catch (e) {
+		if (e instanceof RemoteClosed) throw e;
+		if (/\.mp3$/i.test(p)) throw new Error(`Это mp3, а не wav. ${HOW_TO_WAV}`);
+		throw e;
 	}
-	return full;
+	try {
+		if (!statSync(r.local).isFile()) throw new Error("не файл");
+	} catch {
+		if (/\.mp3$/i.test(r.shown)) throw new Error(`Это mp3, а не wav. ${HOW_TO_WAV}`);
+		throw new Error(`Нет файла ${r.shown}. Свежие wav можно найти через audio_list.`);
+	}
+	return r;
 }
 
-function run(file: string, opts: AnalyzeOptions): AudioAnalysis {
+function run(file: { shown: string; local: string }, opts: AnalyzeOptions): AudioAnalysis {
 	try {
-		return analyzeWav(file, opts);
+		const a = analyzeWav(file.local, opts);
+		a.path = file.shown;
+		return a;
 	} catch (e) {
 		if (e instanceof WavError) throw new Error(e.message);
 		throw e;
@@ -71,8 +80,7 @@ export default function (pi: ExtensionAPI) {
 			},
 		),
 		async execute(_id, p) {
-			const roots = audioRoots(p.extra_dirs ?? []);
-			const files = findWavs(roots, { limit: p.limit ?? 10 });
+			const { files, roots } = await listWavs(p.extra_dirs ?? [], p.limit ?? 10);
 			if (!files.length) return text(`wav не нашлось (искал в: ${roots.join("; ") || "нет существующих папок"}). Попроси экспортировать трек: File → Export Audio/Video, формат WAV, и сказать, куда сохранил.`);
 			const rows = files.map((f, i) => `${i + 1}. ${f.path} — ${new Date(f.mtime).toISOString().slice(0, 16).replace("T", " ")}, ${(f.size / 1048576).toFixed(1)} МБ`);
 			return text(`Найдено ${files.length}:\n${rows.join("\n")}`, { files });
@@ -102,7 +110,7 @@ export default function (pi: ExtensionAPI) {
 			},
 		),
 		async execute(_id, p, _s, _u, ctx) {
-			const file = resolveWav(ctx.cwd, p.path, "wav");
+			const file = await resolveWav(ctx.cwd, p.path, "wav");
 			const a = run(file, { tempo: p.tempo, beatsPerBar: p.beats_per_bar });
 			return text(summarizeAnalysis(a), a);
 		},
@@ -128,8 +136,8 @@ export default function (pi: ExtensionAPI) {
 			},
 		),
 		async execute(_id, p, _s, _u, ctx) {
-			const own = run(resolveWav(ctx.cwd, p.path, "свой wav"), {});
-			const ref = run(resolveWav(ctx.cwd, p.reference, "референс"), {});
+			const own = run(await resolveWav(ctx.cwd, p.path, "свой wav"), {});
+			const ref = run(await resolveWav(ctx.cwd, p.reference, "референс"), {});
 			const c = compareAnalyses(own, ref);
 			return text(c.text, { ...c, own: fileLabel(own), reference: fileLabel(ref) });
 		},

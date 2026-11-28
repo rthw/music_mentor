@@ -11,54 +11,26 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import net from "node:net";
 import path from "node:path";
 import { Type } from "typebox";
 import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
+import { BridgeClosed, DEFAULT_PORT, bridgeAddress, sendLine } from "../lib/mm/bridge.ts";
 import { plural, quietRender } from "../lib/mm/quiet.ts";
+import { RemoteClosed, listProjects, localPath } from "../lib/remote/access.ts";
+import { isRemoteFiles, winBase } from "../lib/remote/paths.ts";
 
-export const DEFAULT_PORT = 9878;
-const TIMEOUT_MS = 35_000;
+export { BridgeClosed, DEFAULT_PORT, bridgeAddress, sendLine };
 
-export function bridgeAddress(env: NodeJS.ProcessEnv = process.env) {
-	return { host: env.MM_LIVE_HOST || "127.0.0.1", port: Number(env.MM_LIVE_PORT) || DEFAULT_PORT };
-}
-
-export class BridgeClosed extends Error {}
-
-/** Одна строка JSON туда, одна обратно. */
-export function sendLine(req: object, addr = bridgeAddress()): Promise<any> {
-	return new Promise((resolve, reject) => {
-		const sock = net.createConnection({ host: addr.host, port: addr.port });
-		let buf = "";
-		const timer = setTimeout(() => {
-			sock.destroy();
-			reject(new Error("Live не ответил за 35 секунд. Возможно, открыт модальный диалог (сохранение, ошибка) — закрой его и повтори."));
-		}, TIMEOUT_MS);
-		sock.setEncoding("utf8");
-		sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"));
-		sock.on("data", (d) => {
-			buf += d;
-			const i = buf.indexOf("\n");
-			if (i >= 0) {
-				clearTimeout(timer);
-				sock.end();
-				try {
-					resolve(JSON.parse(buf.slice(0, i)));
-				} catch {
-					reject(new Error("Мост ответил не JSON-ом: " + buf.slice(0, 200)));
-				}
-			}
-		});
-		sock.on("error", (e: NodeJS.ErrnoException) => {
-			clearTimeout(timer);
-			reject(e.code === "ECONNREFUSED" || e.code === "ETIMEDOUT" ? new BridgeClosed(e.code) : e);
-		});
-	});
-}
-
-function liveRunning(): Promise<boolean | undefined> {
-	if (process.platform !== "win32") return Promise.resolve(undefined);
+/** Запущен ли Live. Windows — по списку процессов; иначе (pi на сервере, Live у ученика) — по ответу моста: закрыт ⇒ false. */
+export async function liveRunning(addr = bridgeAddress()): Promise<boolean | undefined> {
+	if (process.platform !== "win32") {
+		try {
+			await sendLine({ cmd: "ping" }, addr, 3000);
+			return true;
+		} catch (e) {
+			return e instanceof BridgeClosed ? false : undefined;
+		}
+	}
 	return new Promise((resolve) => {
 		execFile("tasklist", ["/FI", "IMAGENAME eq Ableton Live*", "/FO", "CSV", "/NH"], { timeout: 5000 }, (err, out) => resolve(err ? undefined : /Ableton Live/i.test(out)));
 	});
@@ -76,8 +48,8 @@ export function enableSteps(): string {
 	].join("\n");
 }
 
-async function closedMessage(): Promise<string> {
-	const running = await liveRunning();
+async function closedMessage(addr = bridgeAddress()): Promise<string> {
+	const running = await liveRunning(addr);
 	if (running === false) return "Ableton Live не запущен. Запусти Live, открой проект и повтори. Если мост ещё не включён:\n" + enableSteps();
 	return "Live запущен (или я не смог это проверить), но мост MentorBridge не отвечает на порту 9878. " + enableSteps();
 }
@@ -92,7 +64,7 @@ export async function call(req: object, addr = bridgeAddress()): Promise<any> {
 	try {
 		resp = await sendLine(req, addr);
 	} catch (e) {
-		if (e instanceof BridgeClosed) throw new Error(await closedMessage());
+		if (e instanceof BridgeClosed) throw new Error(await closedMessage(addr));
 		throw e;
 	}
 	if (!resp.ok) throw new Error(resp.error ?? "мост вернул ошибку без текста");
@@ -103,22 +75,33 @@ const json = (v: unknown) => JSON.stringify(v);
 
 /** Копия текущего .als в learner/backups. Возвращает путь копии или объяснение, почему её нет. */
 export async function backupProject(cwd: string, addr = bridgeAddress(), now = new Date()): Promise<{ path?: string; note?: string }> {
+	let shown: string | undefined;
 	let src: string | undefined;
+	const remote = isRemoteFiles();
 	try {
 		const song = await call({ cmd: "song" }, addr);
-		if (typeof song.file_path === "string" && song.file_path) src = normalizeUserPath(song.file_path, cwd);
+		if (typeof song.file_path === "string" && song.file_path) shown = song.file_path;
 	} catch {
 		// file_path есть не во всех версиях Live; ниже запасной путь
 	}
-	if (!src || !existsSync(src)) {
-		const files = findProjects(projectRoots([cwd]), { limit: 1 });
-		src = files[0]?.path;
+	if (remote) {
+		// pi на сервере: .als лежит на диске ученика, копию берём из того, что отдал мост
+		try {
+			if (!shown) shown = (await listProjects([], 1, { addr })).files[0]?.path;
+			if (shown) src = (await localPath(cwd, shown, { addr })).local;
+		} catch (e) {
+			if (e instanceof RemoteClosed) throw e;
+			src = undefined;
+		}
+	} else {
+		src = shown ? normalizeUserPath(shown, cwd) : undefined;
+		if (!src || !existsSync(src)) src = findProjects(projectRoots([cwd]), { limit: 1 })[0]?.path;
 	}
 	if (!src) return { note: "проект ещё не сохранён на диск — копировать нечего" };
 	const dir = path.join(cwd, "learner", "backups");
 	mkdirSync(dir, { recursive: true });
 	const stamp = now.toISOString().slice(0, 10);
-	const dest = path.join(dir, `${stamp}_${path.basename(src)}`);
+	const dest = path.join(dir, `${stamp}_${winBase(shown ?? src)}`);
 	copyFileSync(src, dest);
 	return { path: dest };
 }

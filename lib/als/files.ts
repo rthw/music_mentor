@@ -4,11 +4,14 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import path from "node:path";
+import { cleanRemotePath, isRemoteFiles } from "../remote/paths.ts";
 
 const SKIP_DIRS = new Set(["backup", "ableton project info", "node_modules", ".git", "samples", "presets", "$recycle.bin"]);
 
 /** ~, %VAR%, обратные слэши Windows (на POSIX — только если иначе файла нет). */
 export function normalizeUserPath(p: string, cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
+	// Режим «файлы через мост»: путь — с диска ученика (Windows), сервер его не читает; полный путь находит lib/remote.
+	if (isRemoteFiles(env)) return cleanRemotePath(p);
 	let s = p.trim().replace(/^"(.*)"$/, "$1");
 	s = s.replace(/%([^%]+)%/g, (m, name: string) => env[name] ?? env[name.toUpperCase()] ?? m);
 	if (s === "~" || s.startsWith("~/") || s.startsWith("~\\")) s = path.join(homedir(), s.slice(1));

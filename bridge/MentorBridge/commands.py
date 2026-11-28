@@ -776,9 +776,11 @@ def cmd_files_list(ctx, args):
             _granted.append(real)
         if not any(_same(real) == _same(r) for r in roots):
             roots.append(real)
+    if args.get("roots_only") is True:  # дёшево: без обхода диска (сервер так узнаёт корни и домашнюю папку)
+        return {"files": [], "roots": roots, "home": _profile(), "skipped": skipped, "truncated": False}
     found, cut = _walk_files(roots, FILE_EXTS[kind], FILE_DEPTH[kind])
     files = sorted(found.values(), key=lambda f: -f["mtime"])[:limit]
-    return {"files": files, "roots": roots, "skipped": skipped, "truncated": cut}
+    return {"files": files, "roots": roots, "home": _profile(), "skipped": skipped, "truncated": cut}
 
 
 FILE_EXTS = dict((k, tuple(v)) for k, v in FILE_KINDS.items())

@@ -12,22 +12,21 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { analyzeProject } from "../lib/als/analysis.ts";
 import { projectDiff } from "../lib/als/diff.ts";
-import { findProjects, normalizeUserPath, projectRoots } from "../lib/als/files.ts";
 import { findClip, findTrack, clipNotesText } from "../lib/als/notes.ts";
-import { readProject } from "../lib/als/parse.ts";
 import { summarize } from "../lib/als/summary.ts";
+import { RemoteClosed, listProjects, loadProject } from "../lib/remote/access.ts";
 import { headLine, plural, projectName, quietRender } from "../lib/mm/quiet.ts";
 
 function text(t: string, details: object = {}) {
 	return { content: [{ type: "text" as const, text: t }], details };
 }
 
-function load(cwd: string, p: string) {
-	const full = normalizeUserPath(p, cwd);
+async function load(cwd: string, p: string) {
 	try {
-		return { full, project: readProject(full) };
+		return await loadProject(cwd, p);
 	} catch (e) {
-		throw new Error(`Не удалось прочитать проект ${full}: ${(e as Error).message}`);
+		if (e instanceof RemoteClosed) throw e;
+		throw new Error(`Не удалось прочитать проект ${p}: ${(e as Error).message}`);
 	}
 }
 
@@ -51,8 +50,7 @@ export default function (pi: ExtensionAPI) {
 			},
 		),
 		async execute(_id, params) {
-			const roots = projectRoots(params.extra_dirs ?? []);
-			const files = findProjects(roots, { limit: params.limit ?? 20 });
+			const { files, roots } = await listProjects(params.extra_dirs ?? [], params.limit ?? 20);
 			if (!files.length) return text(`Проектов .als не нашлось. Искал в: ${roots.join("; ") || "ни одной существующей папки"}. Спроси, где лежат проекты, и повтори с extra_dirs.`);
 			const rows = files.map((f, i) => `${i + 1}. ${f.path} — ${new Date(f.mtime).toISOString().slice(0, 16).replace("T", " ")}, ${Math.round(f.size / 1024)} КБ`);
 			return text(`Найдено ${files.length} (искал в: ${roots.join("; ")}):\n${rows.join("\n")}`, { files });
@@ -78,7 +76,7 @@ export default function (pi: ExtensionAPI) {
 			},
 		),
 		async execute(_id, params, _s, _u, ctx) {
-			const { project } = load(ctx.cwd, params.path);
+			const { project } = await load(ctx.cwd, params.path);
 			return text(summarize(project), { tempo: project.tempo, liveVersion: project.liveVersion, tracks: project.tracks.length });
 		},
 	});
@@ -98,7 +96,7 @@ export default function (pi: ExtensionAPI) {
 			(r) => `${plural(r?.details?.notes ?? 0, "нота", "ноты", "нот")}`,
 		),
 		async execute(_id, params, _s, _u, ctx) {
-			const { project } = load(ctx.cwd, params.path);
+			const { project } = await load(ctx.cwd, params.path);
 			const track = findTrack(project, params.track);
 			if (!track) throw new Error(`Нет трека «${params.track}». Треков: ${project.tracks.map((t, i) => `${i + 1}:${t.name}`).join(", ")}`);
 			const clip = findClip(track, params.clip);
@@ -121,7 +119,7 @@ export default function (pi: ExtensionAPI) {
 			(r) => headLine(r?.content?.[0]?.text ?? "") || "разобрал",
 		),
 		async execute(_id, params, _s, _u, ctx) {
-			const { project } = load(ctx.cwd, params.path);
+			const { project } = await load(ctx.cwd, params.path);
 			return text(analyzeProject(project));
 		},
 	});
@@ -142,7 +140,7 @@ export default function (pi: ExtensionAPI) {
 			(r) => (r?.details?.first ? "первый снимок записан" : plural(r?.details?.changes ?? 0, "изменение", "изменения", "изменений")),
 		),
 		async execute(_id, params, _s, _u, ctx) {
-			const { project } = load(ctx.cwd, params.path);
+			const { project } = await load(ctx.cwd, params.path);
 			const r = projectDiff(project, ctx.cwd, params.save ?? true);
 			return text(r.text, { first: r.first, changes: r.changes.length });
 		},
