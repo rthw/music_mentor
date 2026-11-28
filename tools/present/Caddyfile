@@ -1,4 +1,4 @@
-# Сайт present: статика открытки и приёмник заявок на /api/*. Запускает present_site.service.
+# Сайт present: статика открытки, приёмник заявок на /api/* и /mentor/* (мост и веб-терминал учеников). Запускает present_site.service.
 {
 	admin off
 	auto_https off
@@ -8,6 +8,16 @@
 	bind 127.0.0.1
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8793
+	}
+	# T1940: Win7-ученики — мост Live (long-poll) и веб-терминал pi (WebSocket) в контейнере tools/vps (run_container.sh).
+	# WebSocket reverse_proxy пропускает сам; flush_interval -1 — не копить ответы long-poll и вывод терминала.
+	handle /mentor/* {
+		reverse_proxy 127.0.0.1:8794 {
+			flush_interval -1
+			transport http {
+				read_timeout 60s
+			}
+		}
 	}
 	handle {
 		root * {env.HOME}/.local/share/present/www
