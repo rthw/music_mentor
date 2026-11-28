@@ -14,3 +14,7 @@ mise exec conda:python@2.7 -- python --version   # скачает Python 2.7 и�
 
 Если Python 2.7 не найден, тест пропускается с пояснением (не падает), но релиз без прогона под 2.7 не считается проверенным.
 Вручную: `python3 tests/bridge/test_mentor_bridge.py` и `mise exec conda:python@2.7 -- python tests/bridge/test_mentor_bridge.py`.
+
+HTTPS-транспорт (T1940, `remote.py`): `RemoteTests` — тестовый HTTP/HTTPS-сервер на месте ретранслятора (ping, кириллица, 4 параллельных запроса,
+повтор с растущей паузой при сбое сети, закрытый порт, чужой токен, `mentor_remote.json`, проверка сертификата на самоподписанном — нужен `openssl`).
+`run_remote_bridge.py` — мост «со стороны ученика» для сквозного теста `tests/win7_installer.test.ts`.

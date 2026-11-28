@@ -437,7 +437,7 @@ short-term max (3 с), LRA (3 с, шаг 1 с, гейт −70/−20, 10–95 п�
   (одностороннее сообщение «music_mentor · заявка»), пересылка не удалась — 502, клиент оставит заявку ждать. Нет сети —
   заявка в `learner/wishes.md` («ждёт отправки»), повтор на `session_start` не чаще раза в сутки.
 
-## 7b. Win7: серверный режим (T1929, T1938)
+## 7b. Win7: серверный режим (T1929, T1938; транспорт PuTTY заменён HTTPS в §7c, T1940)
 
 У друга Windows 7: Node 22 и pi там не поставить, а Live 10.1.x работает. Поэтому pi живёт на сервере
 (контейнер `tools/vps/`), у друга — только PuTTY и мост.
@@ -476,6 +476,47 @@ Win7: Live 10 + MentorBridge (127.0.0.1:9878) ◄── PuTTY -R <порт уч�
     Windows пингует мост (закрыт ⇒ `false`), поэтому «Live закрыт» и «мост выключен» различаются там, где это видно.
   - Не проверено: живая Win7-VM (Python 2.7 моста, реальная скорость через туннель).
 - Не проверено воркером: живая установка на VM `mm_win7_pilot`; `-hostkey` стабилен, пока жив контейнер (`tools/vps/README.md`).
+
+### 7c. Win7 через HTTPS (T1940): вместо PuTTY — браузер и мост по HTTPS
+
+TCP наружу не выпустить (роутер закрыт, playit free — только UDP), а Python Live 10 умеет HTTPS (`ssl`, OpenSSL 1.0.2l, TLS 1.2,
+проверка сертификата `present.whimsical.work` проходит). Поэтому весь трафик идёт на `https://present.whimsical.work/mentor/…`
+(Cloudflare Tunnel → Caddy `127.0.0.1:8792` → контейнер `127.0.0.1:8794`); §7b (PuTTY, ssh-ключи) заменён этим способом.
+
+```
+браузер Win7 ──wss──► /mentor/t/<token>/ ─► ретранслятор ─► ttyd ─► mentor_login ─► pi
+                                                                                    │ TCP 127.0.0.1:<порт ученика>
+Live 10 + MentorBridge ──https long-poll──► /mentor/b/<token>/next, /result ──► ретранслятор ◄┘
+```
+
+- Для pi ничего не изменилось: мост — TCP `127.0.0.1:<порт ученика>` (9901, 9902, …; `~/.mm_bridge_port`, `MM_LIVE_PORT`), строка JSON туда и обратно.
+- **Ретранслятор** (`tools/vps/relay/mm_relay.mjs`, Node без зависимостей, процесс контейнера): на каждого ученика слушает его порт;
+  строка pi → очередь ученика; `GET /mentor/b/<token>/next` — long-poll 25 с (`200 {id,line}` или `204`), `POST …/result {id,line}`.
+  Запросов в полёте несколько (4 параллельных `file_read` — T1937), ответы в одно соединение pi — в порядке запросов. Таймаут ответа 35 с
+  (как `TIMEOUT_MS`), тело ≤ 2 МБ. Мост «онлайн», если был `next` за последние 40 с; иначе соединение pi закрывается сразу
+  (pi говорит «открой Live»). Реестр — файлы `/home/.mm/learners/<имя>.json` (том): `{name, uid, port, sha256}`, **токен хранится только хешем**
+  (≥ 32 случайных байта, base64url), реестр перечитывается раз в секунду. Чужой, пустой, короткий токен — 403.
+- **Мост** (`bridge/MentorBridge/remote.py`, Python 2.7 и 3): если рядом (в папке моста или выше) есть `mentor_remote.json` `{url, token}`,
+  фоновый поток long-poll'ит `next`, кладёт строку в ту же очередь, что и TCP (`BridgeServer.submit`; LOM — только в `poll()` главного потока),
+  ответ шлёт `result`. Сертификат и имя хоста проверяются (`ssl.create_default_context`); без этого контекста (Python < 2.7.9) мост по HTTPS не работает вовсе.
+  Сеть пропала — повтор с паузой 1, 2, 4 … до 30 с, в лог моста (токен из текстов ошибок вырезается); Live не тормозит.
+  Без файла поведение прежнее; локальный TCP 9878 (Windows-режим) не тронут.
+- **Веб-терминал**: ttyd 1.7.7 (в Debian bookworm пакета нет — статический бинарь с проверкой суммы в `Dockerfile`).
+  `/mentor/t/<token>/` ретранслятор проверяет токен, запускает ttyd ученика на unix-сокете `/run/mm/t_<имя>.sock` и проксирует HTTP и WebSocket;
+  ttyd получает путь `/mentor/t/<имя>` (токен не светится в командной строке процессов). Команда — `mentor_web <имя>` (`runuser -l`, затем `mentor_login`).
+  `TERM=xterm-256color`, локаль `ru_RU.UTF-8`, размер окна подстраивает xterm.js. Фронтенд ttyd 1.7.7 — xterm.js 5 с WebGL-рендерером
+  и запасным canvas: в бандле нет `toSorted`/`findLast`/`replaceAll`/`at()`/`structuredClone`/`Object.hasOwn`/`:has()`/`@layer`/`color-mix`,
+  то есть он собран под Chrome ≥ 80 и Firefox ≥ 78; Chrome 109 и Firefox ESR 115 подходят. Живая проверка на Win7 — не сделана.
+- **Caddy** (`tools/present/Caddyfile`): `handle /mentor/*` → `127.0.0.1:8794`, `flush_interval -1`, `read_timeout 60s`; WebSocket `reverse_proxy` ведёт сам.
+- **Контейнер**: `tools/vps/run_container.sh` — тома `<имя>_home` (/home, реестр токенов), `<имя>_ssh` (/etc/ssh), `<имя>_pkg` (пакет pi),
+  `--restart unless-stopped`, порт `127.0.0.1:8794:8794`. После пересоздания учеников из реестра возвращает entrypoint (`useradd -u <uid>`).
+  sshd остался только для администрирования (ForceCommand `mentor_login`, ключи руками).
+- **Заведение**: `new_learner.sh <имя> [--url U]` → zip: `MentorBridge/`, `mentor_remote.json`, `mentor_url.txt`, `install_win7.cmd`,
+  `win7_shortcut.ps1`, `vc_redist.x64.exe`, `README.txt`. `install_win7.cmd` кладёт мост и `mentor_remote.json` в User Library и делает ярлык `.url`
+  «Музыкальный наставник» (открывается в браузере по умолчанию; нужен Chrome 109+ или Firefox 115+). Токен существует только в zip (и в
+  ярлыке/`mentor_remote.json` ученика); повторный запуск для имени — новый токен, старый перестаёт работать. `--url` обязан быть https (кроме loopback).
+- Не проверено: живая Win7-VM (браузер Win7, Python 2.7 Live 10 → Cloudflare), скорость `file_read` по HTTPS; Cloudflare может резать долгие
+  запросы и WebSocket без трафика (long-poll 25 с и ping ttyd 5 с с запасом ниже типичных 100 с).
 
 ## 8. Гипотезы (проверить, не верить)
 
@@ -562,3 +603,6 @@ Win7: Live 10 + MentorBridge (127.0.0.1:9878) ◄── PuTTY -R <порт уч�
   и putty.exe кладутся в zip (на Win7 TLS-скачивание ненадёжно), суммы — `tools/vps/win7/assets.sha256`. Все `.cmd` — ASCII.
 - 2026-11-28 (T1937): файлы ученика в серверном режиме отдаёт мост (`files_list`/`file_read`, §7b), видны только при открытом Live;
   сервер кэширует их по `<hash>-<size>-<mtime>` и отдаёт прежнему коду путь к кэшу (парсеры не менялись). Мост — версия 3.
+- 2026-11-28 (T1940): Win7 — HTTPS вместо PuTTY (§7c). Причина: TCP наружу не выпустить, а Python Live 10 умеет HTTPS. pi и его инструмент `live`
+  не менялись: ретранслятор в контейнере даёт ему тот же TCP-порт ученика. Токен — единственный секрет доступа и к терминалу, и к мосту,
+  на сервере хранится хешем; раздача адреса — только по https. ttyd — статический бинарь 1.7.7 (нет в bookworm). Ключи ssh/PuTTY из поставки убраны.
